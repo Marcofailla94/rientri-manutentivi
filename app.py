@@ -1,0 +1,640 @@
+
+import os
+import json
+from datetime import datetime, date
+from urllib.parse import quote
+
+import pandas as pd
+import streamlit as st
+
+APP_TITLE = "Rientri Manutentivi"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+ASSET_FILE = os.path.join(BASE_DIR, "asset DOR.xlsx")
+SEGNALAZIONI_FILE = os.path.join(BASE_DIR, "Rientrimanutentivi.xlsx")
+CONFIG_FILE = os.path.join(BASE_DIR, "config_email.json")
+LOGO_FILE = os.path.join(BASE_DIR, "regionale.png")
+
+DR_LIST_DEFAULT = [
+    'ABRUZZO', 'CALABRIA', 'CAMPANIA', 'FRIULI-VENEZIA GIULIA', 'LAZIO',
+    'MARCHE', 'PIEMONTE', 'PUGLIA', 'SARDEGNA', 'SICILIA', 'TOSCANA',
+    'TRENTINO-ALTO ADIGE', 'VENETO'
+]
+
+ALL_COLUMNS = [
+    'ID',
+    'DR',
+    'ROTABILE',
+    'IMC',
+    'DATA ANORMALITA',
+    'AVARIA',
+    'N° AVVISO',
+    'GRAVITA',
+    'DATA PRESA IN CARICO',
+    'DATA RIENTRO',
+    'CONGRUENZA (SI/NO)',
+    'NOTE RISCONTRO',
+    'N° ORDINE',
+    'DATA RESE/RIES',
+    'STATO',
+    'DATA CREAZIONE',
+    'ULTIMO AGGIORNAMENTO',
+    '__PowerAppsId__'
+]
+
+STATUS_COLORS = {
+    'APERTA': '#ffd9d9',
+    'IN_CARICO': '#fff2b3',
+    'TRATTATA': '#daf2d0'
+}
+
+STATUS_LABELS = {
+    'APERTA': 'NON TRATTATA',
+    'IN_CARICO': 'PRESA IN CARICO',
+    'TRATTATA': 'TRATTATA'
+}
+
+
+def fmt_date(v):
+    if v is None or v == '':
+        return ''
+    try:
+        if pd.isna(v):
+            return ''
+    except Exception:
+        pass
+    try:
+        return pd.to_datetime(v).strftime('%d/%m/%Y')
+    except Exception:
+        return str(v)
+
+
+def txt(v):
+    if v is None:
+        return ''
+    try:
+        if pd.isna(v):
+            return ''
+    except Exception:
+        pass
+    return str(v).strip()
+
+
+def send_outlook(to, cc, subject, body):
+    try:
+        import win32com.client as win32
+
+        outlook = win32.Dispatch('Outlook.Application')
+        mail = outlook.CreateItem(0)
+        mail.To = to
+        if cc:
+            mail.CC = cc
+        mail.Subject = subject
+        mail.Body = body
+        mail.Display()
+
+        return True, 'Email aperta in Outlook. Controlla e premi Invia.'
+
+    except Exception as e:
+        try:
+            import webbrowser
+            webbrowser.open(mailto(to, cc, subject, body))
+            return True, f'Outlook desktop non disponibile. Ho aperto la bozza email col client predefinito. Dettaglio: {e}'
+        except Exception as e2:
+            return False, f'Apertura Outlook non riuscita: {e}. Anche il fallback mailto non è riuscito: {e2}'
+
+
+def mailto(to, cc, subject, body):
+    url = f"mailto:{quote(to)}?subject={quote(subject)}&body={quote(body)}"
+    if cc:
+        url += f"&cc={quote(cc)}"
+    return url
+
+
+def ensure_config(dr_list):
+    if os.path.exists(CONFIG_FILE):
+        with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+    else:
+        cfg = {
+            'control_room_email': 'm.failla@trenitalia.it',
+            'dr_referenti': {}
+        }
+
+    cfg.setdefault('dr_referenti', {})
+    cfg.setdefault('control_room_email', 'm.failla@trenitalia.it')
+
+    for dr in dr_list:
+        cfg['dr_referenti'].setdefault(dr, {'to': '', 'cc': ''})
+
+    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+    return cfg
+
+
+def find_column(df, candidates):
+    normalized = {str(c).strip().lower(): c for c in df.columns}
+    for cand in candidates:
+        key = cand.strip().lower()
+        if key in normalized:
+            return normalized[key]
+    return None
+
+
+@st.cache_data(show_spinner=False)
+def load_asset():
+    df = pd.read_excel(ASSET_FILE)
+    df = df.rename(columns={c: str(c).strip() for c in df.columns})
+
+    col_dr = find_column(df, ['DR', 'Dr', 'dr'])
+    col_imc = find_column(df, ['IMC', 'Impianto Assegnatario', 'impianto assegnatario'])
+    col_rot = find_column(df, ['codice manutentivo', 'Codice Manutentivo', 'ROTABILE', 'Rotabile'])
+
+    if col_dr is None:
+        raise ValueError("Nel file Asset DOR manca la colonna DR.")
+    if col_imc is None:
+        raise ValueError("Nel file Asset DOR manca la colonna IMC oppure Impianto Assegnatario.")
+    if col_rot is None:
+        raise ValueError("Nel file Asset DOR manca la colonna codice manutentivo oppure Codice Manutentivo.")
+
+    out = pd.DataFrame()
+    out['DR'] = df[col_dr].astype(str).str.strip()
+    out['IMC'] = df[col_imc].astype(str).str.strip()
+    out['ROTABILE'] = df[col_rot].astype(str).str.strip()
+
+    out = out[
+        (out['DR'] != '') &
+        (out['IMC'] != '') &
+        (out['ROTABILE'] != '') &
+        (out['DR'].str.lower() != 'nan') &
+        (out['IMC'].str.lower() != 'nan') &
+        (out['ROTABILE'].str.lower() != 'nan')
+    ].copy()
+
+    out = out.drop_duplicates().reset_index(drop=True)
+    return out
+
+
+def load_segnalazioni():
+    if os.path.exists(SEGNALAZIONI_FILE):
+        df = pd.read_excel(SEGNALAZIONI_FILE)
+    else:
+        df = pd.DataFrame()
+
+    df = df.rename(columns={c: str(c).strip() for c in df.columns})
+
+    if "GRAVITA'" in df.columns and "GRAVITA" not in df.columns:
+        df = df.rename(columns={"GRAVITA'": "GRAVITA"})
+
+    for c in ALL_COLUMNS:
+        if c not in df.columns:
+            df[c] = ''
+
+    df = df[ALL_COLUMNS]
+    df['STATO'] = df['STATO'].replace('', pd.NA).fillna('TRATTATA')
+    save_df(df)
+    return df
+
+
+def save_df(df):
+    df.to_excel(SEGNALAZIONI_FILE, index=False)
+
+
+def next_id(df):
+    prefix = datetime.now().strftime('%Y%m%d')
+    existing = df['ID'].astype(str).fillna('')
+    count = existing[existing.str.startswith(prefix + '-')].shape[0] + 1
+    return f'{prefix}-{count:03d}'
+
+
+def subject_new(row):
+    return f"{row['GRAVITA']} {row['ROTABILE']} - {row['IMC']} - {row['DR']}"
+
+
+def body_new(row):
+    pairs = [
+        ('ID Segnalazione', row['ID']),
+        ('DR', row['DR']),
+        ('IMC', row['IMC']),
+        ('Rotabile', row['ROTABILE']),
+        ('Data anormalità', fmt_date(row['DATA ANORMALITA'])),
+        ('Avaria', row['AVARIA']),
+        ('N° avviso', row['N° AVVISO']),
+        ('Gravità', row['GRAVITA'])
+    ]
+    bullets = '\n'.join([f'- {k}: {v}' for k, v in pairs])
+    return (
+        "Buongiorno,\n"
+        "si richiede quanto in oggetto.\n\n"
+        f"Di seguito i dettagli della segnalazione:\n{bullets}\n\n"
+        "Si prega di prendere in carico la richiesta entro 8 ore dalla ricezione di questa mail."
+    )
+
+
+def subject_takeover(row):
+    return f"Presa in carico rientro {row['ROTABILE']} - {row['IMC']} - {row['DR']}"
+
+
+def body_takeover(row):
+    data_rientro = fmt_date(row["DATA RIENTRO"])
+    rotabile = row["ROTABILE"]
+    imc = row["IMC"]
+    dr = row["DR"]
+    gravita = row["GRAVITA"]
+    avviso = row["N° AVVISO"]
+
+    return f"""Buongiorno,
+si comunica la presa visione e presa in carico della richiesta.
+È stato stabilito con la SOR Regionale il rientro manutentivo nella seguente data:
+
+- Data rientro: {data_rientro}
+- Rotabile: {rotabile}
+- IMC: {imc}
+- DR: {dr}
+- Gravità: {gravita}
+- N° avviso: {avviso}
+"""
+
+
+def subject_closed(row):
+    return f"Chiusura rientro {row['ROTABILE']} - {row['IMC']} - {row['DR']}"
+
+
+def body_closed(row):
+    pairs = [
+        ('Rotabile', row['ROTABILE']),
+        ('DR', row['DR']),
+        ('IMC', row['IMC']),
+        ('Congruenza', row['CONGRUENZA (SI/NO)']),
+        ('Note riscontro', row['NOTE RISCONTRO']),
+        ('N° ordine', row['N° ORDINE']),
+        ('Data RESE/RIES', fmt_date(row['DATA RESE/RIES']))
+    ]
+    bullets = '\n'.join([f'- {k}: {v}' for k, v in pairs])
+    return (
+        "Buongiorno,\n"
+        "si comunica l'avvenuta conclusione dell'intervento manutentivo.\n\n"
+        f"Dettagli finali:\n{bullets}"
+    )
+
+
+def card(row):
+    bg = STATUS_COLORS.get(row['STATO'], '#fff')
+    st.markdown(
+        f'''
+        <div style="background:{bg}; border:1px solid #d0d7de; border-radius:12px; padding:12px; margin-bottom:10px;">
+          <div style="font-weight:700;">{txt(row['ID'])} | {txt(row['ROTABILE'])}</div>
+          <div style="color:#555;">DR: {txt(row['DR'])} | IMC: {txt(row['IMC'])} | Gravità: {txt(row['GRAVITA'])} | Stato: {STATUS_LABELS.get(row['STATO'], row['STATO'])}</div>
+          <div style="color:#555;">Data anormalità: {fmt_date(row['DATA ANORMALITA'])} | N° avviso: {txt(row['N° AVVISO'])}</div>
+          <div style="margin-top:8px;"><b>Avaria:</b> {txt(row['AVARIA'])}</div>
+        </div>
+        ''',
+        unsafe_allow_html=True
+    )
+
+
+def render_header():
+    st.markdown('''
+    <style>
+    .hdr{background:#ffd84d;border:2px solid #d0b03a;border-radius:12px;padding:16px 18px;margin-bottom:18px;}
+    .t1{color:#0b6b2e;font-weight:800;font-size:30px;line-height:1.1;margin:0;}
+    .t2{color:#0b6b2e;font-weight:800;font-size:22px;line-height:1.2;margin:6px 0 0 0;}
+    .t3{color:#0b6b2e;font-weight:800;font-size:18px;line-height:1.2;margin:4px 0 0 0;}
+    .pill{display:inline-block;margin-top:10px;padding:6px 12px;border-radius:999px;background:#0b6b2e;color:#fff;font-weight:700;}
+    </style>
+    ''', unsafe_allow_html=True)
+
+    c1, c2 = st.columns([4, 1])
+
+    with c1:
+        st.markdown('''
+        <div class="hdr">
+            <div class="t1">Direzione Operations Regionale</div>
+            <div class="t2">Manutenzione Regionale</div>
+            <div class="t3">Maintenance & Standard Engineering</div>
+            <div class="pill">Rientri Manutentivi</div>
+        </div>
+        ''', unsafe_allow_html=True)
+
+    with c2:
+        if os.path.exists(LOGO_FILE):
+            st.image(LOGO_FILE, use_container_width=True)
+        else:
+            st.warning('Inserisci regionale.png nella cartella del progetto.')
+
+
+def main():
+    st.set_page_config(page_title=APP_TITLE, layout='wide')
+    render_header()
+
+    asset = load_asset()
+    dr_list = sorted(set(DR_LIST_DEFAULT) | set(asset['DR'].dropna().astype(str).str.strip().tolist()))
+    cfg = ensure_config(dr_list)
+    df = load_segnalazioni()
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric('Non trattate', int((df['STATO'] == 'APERTA').sum()))
+    m2.metric('Prese in carico', int((df['STATO'] == 'IN_CARICO').sum()))
+    m3.metric('Trattate', int((df['STATO'] == 'TRATTATA').sum()))
+
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        'Nuova segnalazione',
+        'Non trattate / In carico',
+        'Segnalazioni trattate',
+        'Configurazione email',
+        'Archivio'
+    ])
+
+    with tab1:
+        st.subheader('Nuova segnalazione')
+
+        c1, c2 = st.columns(2)
+
+        with c1:
+            dr_options = sorted(asset['DR'].dropna().astype(str).str.strip().unique().tolist())
+            dr_sel = st.selectbox("DR", dr_options)
+
+            asset_dr = asset[asset['DR'] == dr_sel].copy()
+
+            imc_list = sorted(asset_dr['IMC'].dropna().astype(str).str.strip().unique().tolist())
+            opzioni_imc = imc_list + ["ALTRO / INSERIMENTO MANUALE"]
+            imc_scelto = st.selectbox("IMC (Impianto assegnatario)", opzioni_imc)
+
+            if imc_scelto == "ALTRO / INSERIMENTO MANUALE":
+                imc_finale = st.text_input("Inserisci IMC manualmente")
+                asset_imc = asset_dr.copy()
+            else:
+                imc_finale = imc_scelto
+                asset_imc = asset_dr[asset_dr['IMC'] == imc_scelto].copy()
+
+            rotabili_list = sorted(asset_imc['ROTABILE'].dropna().astype(str).str.strip().unique().tolist())
+            opzioni_rotabile = rotabili_list + ["ALTRO / INSERIMENTO MANUALE"]
+            rotabile_scelto = st.selectbox("ROTABILE", opzioni_rotabile)
+
+            if rotabile_scelto == "ALTRO / INSERIMENTO MANUALE":
+                rotabile_finale = st.text_input("Inserisci rotabile manualmente")
+            else:
+                rotabile_finale = rotabile_scelto
+
+        with st.form('new_form'):
+            c3, c4 = st.columns(2)
+
+            with c3:
+                data_an = st.date_input("DATA ANORMALITA", value=date.today(), format="DD/MM/YYYY")
+                grav = st.selectbox(
+                    "GRAVITA",
+                    [
+                        "Rientro immediato",
+                        "Rientro da turno manutentivo",
+                        "Rientro entro 24 H",
+                        "Rientro entro 48 H",
+                        "Rientro entro 72 H"
+                    ]
+                )
+
+            with c4:
+                n_avviso = st.text_input('N° AVVISO')
+                avaria = st.text_area('AVARIA', height=120)
+                invia = st.checkbox(
+                    'Invia email ai referenti regionali subito dopo il salvataggio',
+                    value=True
+                )
+
+            ok = st.form_submit_button('Salva segnalazione', use_container_width=True)
+
+        if ok:
+            if not (dr_sel and txt(imc_finale) and txt(rotabile_finale) and avaria.strip()):
+                st.error('Compila tutti i campi obbligatori.')
+            else:
+                now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                row = {
+                    'ID': next_id(df),
+                    'DR': dr_sel,
+                    'ROTABILE': txt(rotabile_finale),
+                    'IMC': txt(imc_finale),
+                    'DATA ANORMALITA': pd.to_datetime(data_an),
+                    'AVARIA': avaria.strip(),
+                    'N° AVVISO': txt(n_avviso),
+                    'GRAVITA': grav,
+                    'DATA PRESA IN CARICO': '',
+                    'DATA RIENTRO': '',
+                    'CONGRUENZA (SI/NO)': '',
+                    'NOTE RISCONTRO': '',
+                    'N° ORDINE': '',
+                    'DATA RESE/RIES': '',
+                    'STATO': 'APERTA',
+                    'DATA CREAZIONE': now,
+                    'ULTIMO AGGIORNAMENTO': now,
+                    '__PowerAppsId__': ''
+                }
+
+                df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+                save_df(df)
+                st.success(f"Segnalazione {row['ID']} salvata.")
+
+                ref = cfg['dr_referenti'].get(dr_sel, {'to': '', 'cc': ''})
+                if invia and ref.get('to'):
+                    sub, body = subject_new(row), body_new(row)
+                    sent, msg = send_outlook(ref['to'], ref.get('cc', ''), sub, body)
+                    if sent:
+                        st.success(msg)
+                    else:
+                        st.warning(msg)
+                        st.link_button('Apri bozza email', mailto(ref['to'], ref.get('cc', ''), sub, body))
+                elif invia:
+                    st.warning('Email referenti non configurate per questa DR.')
+
+                st.cache_data.clear()
+                st.rerun()
+
+    with tab2:
+        st.subheader('Segnalazioni non trattate')
+
+        filtro_tab2 = st.selectbox('Filtra per DR', ['TUTTE'] + dr_list, key='filtro_tab2')
+
+        aperte = df[df['STATO'] == 'APERTA'].copy()
+        if filtro_tab2 != 'TUTTE':
+            aperte = aperte[aperte['DR'] == filtro_tab2]
+
+        if aperte.empty:
+            st.info('Non ci sono segnalazioni aperte.')
+
+        for _, row in aperte.sort_values(by='DATA CREAZIONE', ascending=False).iterrows():
+            card(row)
+            with st.expander(f"Azioni segnalazione {row['ID']}"):
+                data_rientro = st.date_input(
+                    f"DATA RIENTRO - {row['ID']}",
+                    value=date.today(),
+                    format='DD/MM/YYYY',
+                    key=f"rientro_{row['ID']}"
+                )
+                invia = st.checkbox(
+                    'Invia email a Control Room Regionale',
+                    value=True,
+                    key=f"mail_presa_{row['ID']}"
+                )
+
+                if st.button(f"Presa in carico {row['ID']}", key=f"presa_{row['ID']}", use_container_width=True):
+                    mask = df['ID'].astype(str) == str(row['ID'])
+                    df.loc[mask, 'DATA PRESA IN CARICO'] = pd.to_datetime(datetime.now().date())
+                    df.loc[mask, 'DATA RIENTRO'] = pd.to_datetime(data_rientro)
+                    df.loc[mask, 'STATO'] = 'IN_CARICO'
+                    df.loc[mask, 'ULTIMO AGGIORNAMENTO'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    save_df(df)
+
+                    upd = df.loc[mask].iloc[0].to_dict()
+                    to = cfg.get('control_room_email', '')
+
+                    if invia and to:
+                        sub, body = subject_takeover(upd), body_takeover(upd)
+                        sent, msg = send_outlook(to, '', sub, body)
+                        if sent:
+                            st.success(msg)
+                        else:
+                            st.warning(msg)
+                            st.link_button('Apri bozza email', mailto(to, '', sub, body))
+
+                    st.success('Segnalazione presa in carico.')
+                    st.rerun()
+
+        st.divider()
+        st.subheader('Segnalazioni prese in carico')
+
+        carico = df[df['STATO'] == 'IN_CARICO'].copy()
+        if filtro_tab2 != 'TUTTE':
+            carico = carico[carico['DR'] == filtro_tab2]
+
+        if carico.empty:
+            st.info('Non ci sono segnalazioni in carico.')
+
+        for _, row in carico.sort_values(by='ULTIMO AGGIORNAMENTO', ascending=False).iterrows():
+            card(row)
+            st.caption(
+                f"Data presa in carico: {fmt_date(row['DATA PRESA IN CARICO'])} | "
+                f"Data rientro: {fmt_date(row['DATA RIENTRO'])}"
+            )
+
+            with st.expander(f"Completa lavorazione {row['ID']}"):
+                c1, c2 = st.columns(2)
+
+                with c1:
+                    congr = st.selectbox('CONGRUENZA (SI/NO)', ['SI', 'NO'], key=f"cong_{row['ID']}")
+                    ordine = st.text_input('N° ORDINE', key=f"ord_{row['ID']}")
+
+                with c2:
+                    data_rese = st.date_input(
+                        'DATA RESE/RIES',
+                        value=date.today(),
+                        format='DD/MM/YYYY',
+                        key=f"rese_{row['ID']}"
+                    )
+                    invia = st.checkbox(
+                        'Invia email di chiusura alla Control Room Regionale',
+                        value=True,
+                        key=f"mail_close_{row['ID']}"
+                    )
+
+                note = st.text_area('NOTE RISCONTRO', key=f"note_{row['ID']}", height=100)
+
+                if st.button(f"Chiudi segnalazione {row['ID']}", key=f"close_{row['ID']}", use_container_width=True):
+                    mask = df['ID'].astype(str) == str(row['ID'])
+                    df.loc[mask, 'CONGRUENZA (SI/NO)'] = congr
+                    df.loc[mask, 'NOTE RISCONTRO'] = note
+                    df.loc[mask, 'N° ORDINE'] = ordine
+                    df.loc[mask, 'DATA RESE/RIES'] = pd.to_datetime(data_rese)
+                    df.loc[mask, 'STATO'] = 'TRATTATA'
+                    df.loc[mask, 'ULTIMO AGGIORNAMENTO'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    save_df(df)
+
+                    upd = df.loc[mask].iloc[0].to_dict()
+                    to = cfg.get('control_room_email', '')
+
+                    if invia and to:
+                        sub, body = subject_closed(upd), body_closed(upd)
+                        sent, msg = send_outlook(to, '', sub, body)
+                        if sent:
+                            st.success(msg)
+                        else:
+                            st.warning(msg)
+                            st.link_button('Apri bozza email', mailto(to, '', sub, body))
+
+                    st.success('Segnalazione chiusa e archiviata.')
+                    st.rerun()
+
+    with tab3:
+        st.subheader('Segnalazioni trattate')
+        tr = df[df['STATO'] == 'TRATTATA'].copy()
+
+        filtro = st.selectbox('Filtra per DR', ['TUTTE'] + dr_list)
+        if filtro != 'TUTTE':
+            tr = tr[tr['DR'] == filtro]
+
+        if tr.empty:
+            st.info('Non ci sono segnalazioni trattate.')
+
+        for _, row in tr.sort_values(by='ULTIMO AGGIORNAMENTO', ascending=False).iterrows():
+            card(row)
+            st.caption(
+                f"Data rientro: {fmt_date(row['DATA RIENTRO'])} | "
+                f"Data RESE/RIES: {fmt_date(row['DATA RESE/RIES'])} | "
+                f"Congruenza: {txt(row['CONGRUENZA (SI/NO)'])} | "
+                f"N° Ordine: {txt(row['N° ORDINE'])}"
+            )
+
+    with tab4:
+        st.subheader('Configurazione email regionali')
+
+        with st.form("config_email_form"):
+            control = st.text_input(
+                'Email Control Room Regionale',
+                value=cfg.get('control_room_email', '')
+            )
+
+            rows = [
+                {
+                    'DR': dr,
+                    'EMAIL_TO': cfg.get('dr_referenti', {}).get(dr, {}).get('to', ''),
+                    'EMAIL_CC': cfg.get('dr_referenti', {}).get(dr, {}).get('cc', '')
+                }
+                for dr in dr_list
+            ]
+
+            edit = st.data_editor(
+                pd.DataFrame(rows),
+                use_container_width=True,
+                num_rows='fixed',
+                hide_index=True,
+                key='editor_email_dr'
+            )
+
+            salva_cfg = st.form_submit_button('Salva configurazione email', use_container_width=True)
+
+        if salva_cfg:
+            out = {
+                'control_room_email': txt(control),
+                'dr_referenti': {}
+            }
+
+            for _, r in edit.iterrows():
+                dr_nome = txt(r['DR'])
+                out['dr_referenti'][dr_nome] = {
+                    'to': txt(r['EMAIL_TO']),
+                    'cc': txt(r['EMAIL_CC'])
+                }
+
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(out, f, ensure_ascii=False, indent=2)
+
+            st.success('Configurazione email aggiornata.')
+            st.rerun()
+
+    with tab5:
+        st.subheader('Archivio completo')
+        view = df.copy()
+        for c in ['DATA ANORMALITA', 'DATA PRESA IN CARICO', 'DATA RIENTRO', 'DATA RESE/RIES']:
+            view[c] = view[c].apply(fmt_date)
+        st.dataframe(view.fillna(''), use_container_width=True, hide_index=True)
+
+
+if __name__ == '__main__':
+    main()

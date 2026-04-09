@@ -1,0 +1,57 @@
+{
+  "control_room_email": "m.failla@trenitalia.it",
+  "dr_referenti": {
+    "ABRUZZO": {
+      "to": "",
+      "cc": ""
+    },
+    "CALABRIA": {
+      "to": "",
+      "cc": ""
+    },
+    "CAMPANIA": {
+      "to": "",
+      "cc": ""
+    },
+    "FRIULI-VENEZIA GIULIA": {
+      "to": "",
+      "cc": ""
+    },
+    "LAZIO": {
+      "to": "",
+      "cc": ""
+    },
+    "MARCHE": {
+      "to": "",
+      "cc": ""
+    },
+    "PIEMONTE": {
+      "to": "",
+      "cc": ""
+    },
+    "PUGLIA": {
+      "to": "",
+      "cc": ""
+    },
+    "SARDEGNA": {
+      "to": "",
+      "cc": ""
+    },
+    "SICILIA": {
+      "to": "m.failla@trenitalia.it",
+      "cc": ""
+    },
+    "TOSCANA": {
+      "to": "",
+      "cc": ""
+    },
+    "TRENTINO-ALTO ADIGE": {
+      "to": "",
+      "cc": ""
+    },
+    "VENETO": {
+      "to": "",
+      "cc": ""
+    }
+  }
+}
