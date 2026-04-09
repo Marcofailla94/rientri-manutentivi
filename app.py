@@ -80,27 +80,7 @@ def txt(v):
 
 
 def send_outlook(to, cc, subject, body):
-    try:
-        import win32com.client as win32
-
-        outlook = win32.Dispatch('Outlook.Application')
-        mail = outlook.CreateItem(0)
-        mail.To = to
-        if cc:
-            mail.CC = cc
-        mail.Subject = subject
-        mail.Body = body
-        mail.Display()
-
-        return True, 'Email aperta in Outlook. Controlla e premi Invia.'
-
-    except Exception as e:
-        try:
-            import webbrowser
-            webbrowser.open(mailto(to, cc, subject, body))
-            return True, f'Outlook desktop non disponibile. Ho aperto la bozza email col client predefinito. Dettaglio: {e}'
-        except Exception as e2:
-            return False, f'Apertura Outlook non riuscita: {e}. Anche il fallback mailto non è riuscito: {e2}'
+    return False, "Invio tramite Outlook desktop non disponibile nella versione cloud."
 
 
 def mailto(to, cc, subject, body):
