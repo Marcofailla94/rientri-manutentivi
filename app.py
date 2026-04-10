@@ -342,8 +342,54 @@ def render_header():
             st.warning('Inserisci regionale.png nella cartella del progetto.')
 
 
+def init_mail_state():
+    if 'mail_link' not in st.session_state:
+        st.session_state.mail_link = ''
+    if 'mail_subject' not in st.session_state:
+        st.session_state.mail_subject = ''
+    if 'mail_body' not in st.session_state:
+        st.session_state.mail_body = ''
+    if 'mail_message' not in st.session_state:
+        st.session_state.mail_message = ''
+    if 'mail_context' not in st.session_state:
+        st.session_state.mail_context = ''
+
+
+def set_pending_mail(context, link, subject, body, message):
+    st.session_state.mail_context = context
+    st.session_state.mail_link = link
+    st.session_state.mail_subject = subject
+    st.session_state.mail_body = body
+    st.session_state.mail_message = message
+
+
+def clear_pending_mail():
+    st.session_state.mail_context = ''
+    st.session_state.mail_link = ''
+    st.session_state.mail_subject = ''
+    st.session_state.mail_body = ''
+    st.session_state.mail_message = ''
+
+
+def render_pending_mail(context):
+    if st.session_state.mail_context == context and st.session_state.mail_link:
+        st.info(st.session_state.mail_message)
+        st.link_button(
+            'Apri bozza email',
+            st.session_state.mail_link,
+            use_container_width=True
+        )
+        with st.expander("Mostra testo email"):
+            st.text_input("Oggetto", st.session_state.mail_subject, key=f"obj_{context}")
+            st.text_area("Corpo", st.session_state.mail_body, height=220, key=f"body_{context}")
+        if st.button("Chiudi bozza pronta", key=f"close_mail_{context}", use_container_width=True):
+            clear_pending_mail()
+            st.rerun()
+
+
 def main():
     st.set_page_config(page_title=APP_TITLE, layout='wide')
+    init_mail_state()
     render_header()
 
     asset = load_asset()
@@ -366,6 +412,7 @@ def main():
 
     with tab1:
         st.subheader('Nuova segnalazione')
+        render_pending_mail('new')
 
         c1, c2 = st.columns(2)
 
@@ -419,7 +466,7 @@ def main():
                     value=True
                 )
 
-            ok = st.form_submit_button('Salva segnalazione', use_container_width=True)
+            ok = st.form_submit_button('Salva segnalazione e apri bozza mail', use_container_width=True)
 
         if ok:
             if not (dr_sel and txt(imc_finale) and txt(rotabile_finale) and avaria.strip()):
@@ -455,20 +502,22 @@ def main():
                 ref = cfg['dr_referenti'].get(dr_sel, {'to': '', 'cc': ''})
                 if invia and ref.get('to'):
                     sub, body = subject_new(row), body_new(row)
-                    st.info("Invio automatico non disponibile in questa versione cloud.")
-                    st.link_button(
-                        'Apri bozza email',
+                    set_pending_mail(
+                        'new',
                         mailto(ref['to'], ref.get('cc', ''), sub, body),
-                        use_container_width=True
+                        sub,
+                        body,
+                        "Bozza email pronta per i referenti regionali."
                     )
+                    st.rerun()
                 elif invia:
                     st.warning('Email referenti non configurate per questa DR.')
 
                 st.cache_data.clear()
-                st.rerun()
 
     with tab2:
-        st.subheader('Segnalazioni non trattate')
+        st.subheader('Segnalazioni non trattate / In carico (a cura GT)')
+        render_pending_mail('takeover')
 
         filtro_tab2 = st.selectbox('Filtra per DR', ['TUTTE'] + dr_list, key='filtro_tab2')
 
@@ -494,7 +543,7 @@ def main():
                     key=f"mail_presa_{row['ID']}"
                 )
 
-                if st.button(f"Presa in carico {row['ID']}", key=f"presa_{row['ID']}", use_container_width=True):
+                if st.button(f"Presa in carico e apri bozza mail {row['ID']}", key=f"presa_{row['ID']}", use_container_width=True):
                     mask = df['ID'].astype(str) == str(row['ID'])
                     df.loc[mask, 'DATA PRESA IN CARICO'] = pd.to_datetime(datetime.now().date())
                     df.loc[mask, 'DATA RIENTRO'] = pd.to_datetime(data_rientro)
@@ -507,15 +556,16 @@ def main():
 
                     if invia and to:
                         sub, body = subject_takeover(upd), body_takeover(upd)
-                        st.info("Invio automatico non disponibile in questa versione cloud.")
-                        st.link_button(
-                            'Apri bozza email',
+                        set_pending_mail(
+                            'takeover',
                             mailto(to, '', sub, body),
-                            use_container_width=True
+                            sub,
+                            body,
+                            "Bozza email pronta per la presa in carico."
                         )
+                        st.rerun()
 
                     st.success('Segnalazione presa in carico.')
-                    st.rerun()
 
         st.divider()
         st.subheader('Segnalazioni prese in carico')
@@ -536,6 +586,9 @@ def main():
 
     with tab3:
         st.subheader('Segnalazioni in carico (a cura GT o referente IMC)')
+        render_pending_mail('reschedule')
+        render_pending_mail('close')
+
         carico_tab3 = df[df['STATO'] == 'IN_CARICO'].copy()
 
         filtro_tab3 = st.selectbox('Filtra per DR', ['TUTTE'] + dr_list, key='filtro_tab3')
@@ -570,7 +623,7 @@ def main():
                     key=f"mail_variazione_{row['ID']}"
                 )
 
-                if st.button(f"Aggiorna rientro {row['ID']}", key=f"update_rientro_{row['ID']}", use_container_width=True):
+                if st.button(f"Aggiorna rientro e apri bozza mail {row['ID']}", key=f"update_rientro_{row['ID']}", use_container_width=True):
                     if not txt(motivazione):
                         st.error('Inserisci la motivazione del cambio rientro.')
                     else:
@@ -588,15 +641,16 @@ def main():
 
                         if invia_variazione and to:
                             sub, body = subject_reschedule(upd), body_reschedule(upd, old_date, new_date, txt(motivazione))
-                            st.info("Invio automatico non disponibile in questa versione cloud.")
-                            st.link_button(
-                                'Apri bozza email',
+                            set_pending_mail(
+                                'reschedule',
                                 mailto(to, '', sub, body),
-                                use_container_width=True
+                                sub,
+                                body,
+                                "Bozza email pronta per la variazione del rientro."
                             )
+                            st.rerun()
 
                         st.success('Data rientro aggiornata correttamente.')
-                        st.rerun()
 
             with st.expander(f"Completa lavorazione {row['ID']}"):
                 c1, c2 = st.columns(2)
@@ -620,7 +674,7 @@ def main():
 
                 note = st.text_area('NOTE RISCONTRO', key=f"note_tab3_{row['ID']}", height=100)
 
-                if st.button(f"Chiudi segnalazione {row['ID']}", key=f"close_tab3_{row['ID']}", use_container_width=True):
+                if st.button(f"Chiudi segnalazione e apri bozza mail {row['ID']}", key=f"close_tab3_{row['ID']}", use_container_width=True):
                     mask = df['ID'].astype(str) == str(row['ID'])
                     df.loc[mask, 'CONGRUENZA (SI/NO)'] = congr
                     df.loc[mask, 'NOTE RISCONTRO'] = note
@@ -635,15 +689,16 @@ def main():
 
                     if invia and to:
                         sub, body = subject_closed(upd), body_closed(upd)
-                        st.info("Invio automatico non disponibile in questa versione cloud.")
-                        st.link_button(
-                            'Apri bozza email',
+                        set_pending_mail(
+                            'close',
                             mailto(to, '', sub, body),
-                            use_container_width=True
+                            sub,
+                            body,
+                            "Bozza email pronta per la chiusura della segnalazione."
                         )
+                        st.rerun()
 
                     st.success('Segnalazione chiusa e archiviata.')
-                    st.rerun()
 
     with tab4:
         st.subheader('Configurazione email regionali')
@@ -721,4 +776,5 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
