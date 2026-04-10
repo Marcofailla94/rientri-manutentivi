@@ -3,6 +3,7 @@ import os
 import json
 from datetime import datetime, date
 from urllib.parse import quote
+from io import BytesIO
 
 import pandas as pd
 import streamlit as st
@@ -38,6 +39,7 @@ ALL_COLUMNS = [
     'STATO',
     'DATA CREAZIONE',
     'ULTIMO AGGIORNAMENTO',
+    'MOTIVAZIONE CAMBIO RIENTRO',
     '__PowerAppsId__'
 ]
 
@@ -80,7 +82,27 @@ def txt(v):
 
 
 def send_outlook(to, cc, subject, body):
-    return False, "Invio tramite Outlook desktop non disponibile nella versione cloud."
+    try:
+        import win32com.client as win32
+
+        outlook = win32.Dispatch('Outlook.Application')
+        mail = outlook.CreateItem(0)
+        mail.To = to
+        if cc:
+            mail.CC = cc
+        mail.Subject = subject
+        mail.Body = body
+        mail.Display()
+
+        return True, 'Email aperta in Outlook. Controlla e premi Invia.'
+
+    except Exception as e:
+        try:
+            import webbrowser
+            webbrowser.open(mailto(to, cc, subject, body))
+            return True, f'Outlook desktop non disponibile. Ho aperto la bozza email col client predefinito. Dettaglio: {e}'
+        except Exception as e2:
+            return False, f'Apertura Outlook non riuscita: {e}. Anche il fallback mailto non è riuscito: {e2}'
 
 
 def mailto(to, cc, subject, body):
@@ -179,6 +201,13 @@ def load_segnalazioni():
 def save_df(df):
     df.to_excel(SEGNALAZIONI_FILE, index=False)
 
+def dataframe_to_excel_bytes(df):
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Archivio')
+    output.seek(0)
+    return output.getvalue()
+    
 
 def next_id(df):
     prefix = datetime.now().strftime('%Y%m%d')
@@ -236,6 +265,29 @@ si comunica la presa visione e presa in carico della richiesta.
 """
 
 
+def subject_reschedule(row):
+    return f"Variazione data rientro {row['ROTABILE']} - {row['IMC']} - {row['DR']}"
+
+
+def body_reschedule(row, old_date, new_date, motivo):
+    return f"""Buongiorno,
+si comunica una variazione della data di rientro manutentivo precedentemente stabilita.
+
+Dettagli della segnalazione:
+- ID Segnalazione: {row['ID']}
+- Rotabile: {row['ROTABILE']}
+- IMC: {row['IMC']}
+- DR: {row['DR']}
+- Gravità: {row['GRAVITA']}
+- N° avviso: {row['N° AVVISO']}
+
+Variazione rientro:
+- Data rientro precedente: {old_date}
+- Nuova data rientro: {new_date}
+- Motivazione cambio rientro: {motivo}
+"""
+
+
 def subject_closed(row):
     return f"Chiusura rientro {row['ROTABILE']} - {row['IMC']} - {row['DR']}"
 
@@ -260,6 +312,12 @@ def body_closed(row):
 
 def card(row):
     bg = STATUS_COLORS.get(row['STATO'], '#fff')
+    motivazione = txt(row.get('MOTIVAZIONE CAMBIO RIENTRO', ''))
+
+    extra = ""
+    if motivazione:
+        extra = f'<div style="margin-top:6px;color:#7a5c00;"><b>Motivazione ultimo cambio rientro:</b> {motivazione}</div>'
+
     st.markdown(
         f'''
         <div style="background:{bg}; border:1px solid #d0d7de; border-radius:12px; padding:12px; margin-bottom:10px;">
@@ -267,6 +325,7 @@ def card(row):
           <div style="color:#555;">DR: {txt(row['DR'])} | IMC: {txt(row['IMC'])} | Gravità: {txt(row['GRAVITA'])} | Stato: {STATUS_LABELS.get(row['STATO'], row['STATO'])}</div>
           <div style="color:#555;">Data anormalità: {fmt_date(row['DATA ANORMALITA'])} | N° avviso: {txt(row['N° AVVISO'])}</div>
           <div style="margin-top:8px;"><b>Avaria:</b> {txt(row['AVARIA'])}</div>
+          {extra}
         </div>
         ''',
         unsafe_allow_html=True
@@ -319,8 +378,8 @@ def main():
 
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         'Nuova segnalazione',
-        'Non trattate / In carico',
-        'Segnalazioni trattate',
+        'Non trattate / In carico (a cura GT)',
+        'Segnalazioni in carico (a cura GT o referente IMC)',
         'Configurazione email',
         'Archivio'
     ])
@@ -405,6 +464,7 @@ def main():
                     'STATO': 'APERTA',
                     'DATA CREAZIONE': now,
                     'ULTIMO AGGIORNAMENTO': now,
+                    'MOTIVAZIONE CAMBIO RIENTRO': '',
                     '__PowerAppsId__': ''
                 }
 
@@ -494,29 +554,93 @@ def main():
                 f"Data rientro: {fmt_date(row['DATA RIENTRO'])}"
             )
 
+    with tab3:
+        st.subheader('Segnalazioni in carico (a cura GT o referente IMC)')
+        carico_tab3 = df[df['STATO'] == 'IN_CARICO'].copy()
+
+        filtro_tab3 = st.selectbox('Filtra per DR', ['TUTTE'] + dr_list, key='filtro_tab3')
+        if filtro_tab3 != 'TUTTE':
+            carico_tab3 = carico_tab3[carico_tab3['DR'] == filtro_tab3]
+
+        if carico_tab3.empty:
+            st.info('Non ci sono segnalazioni in carico.')
+
+        for _, row in carico_tab3.sort_values(by='ULTIMO AGGIORNAMENTO', ascending=False).iterrows():
+            card(row)
+            st.caption(
+                f"Data presa in carico: {fmt_date(row['DATA PRESA IN CARICO'])} | "
+                f"Data rientro attuale: {fmt_date(row['DATA RIENTRO'])}"
+            )
+
+            with st.expander(f"Riprogramma / Ritratta segnalazione {row['ID']}"):
+                nuova_data = st.date_input(
+                    'Nuova DATA RIENTRO',
+                    value=pd.to_datetime(row['DATA RIENTRO']).date() if txt(row['DATA RIENTRO']) else date.today(),
+                    format='DD/MM/YYYY',
+                    key=f"nuova_data_{row['ID']}"
+                )
+                motivazione = st.text_area(
+                    'Motivazione cambio rientro',
+                    key=f"motivo_rientro_{row['ID']}",
+                    height=100
+                )
+                invia_variazione = st.checkbox(
+                    'Invia email di variazione alla Control Room Regionale',
+                    value=True,
+                    key=f"mail_variazione_{row['ID']}"
+                )
+
+                if st.button(f"Aggiorna rientro {row['ID']}", key=f"update_rientro_{row['ID']}", use_container_width=True):
+                    if not txt(motivazione):
+                        st.error('Inserisci la motivazione del cambio rientro.')
+                    else:
+                        mask = df['ID'].astype(str) == str(row['ID'])
+                        old_date = fmt_date(df.loc[mask, 'DATA RIENTRO'].iloc[0])
+
+                        df.loc[mask, 'DATA RIENTRO'] = pd.to_datetime(nuova_data)
+                        df.loc[mask, 'MOTIVAZIONE CAMBIO RIENTRO'] = txt(motivazione)
+                        df.loc[mask, 'ULTIMO AGGIORNAMENTO'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        save_df(df)
+
+                        upd = df.loc[mask].iloc[0].to_dict()
+                        new_date = fmt_date(upd['DATA RIENTRO'])
+                        to = cfg.get('control_room_email', '')
+
+                        if invia_variazione and to:
+                            sub, body = subject_reschedule(upd), body_reschedule(upd, old_date, new_date, txt(motivazione))
+                            sent, msg = send_outlook(to, '', sub, body)
+                            if sent:
+                                st.success(msg)
+                            else:
+                                st.warning(msg)
+                                st.link_button('Apri bozza email', mailto(to, '', sub, body))
+
+                        st.success('Data rientro aggiornata correttamente.')
+                        st.rerun()
+
             with st.expander(f"Completa lavorazione {row['ID']}"):
                 c1, c2 = st.columns(2)
 
                 with c1:
-                    congr = st.selectbox('CONGRUENZA (SI/NO)', ['SI', 'NO'], key=f"cong_{row['ID']}")
-                    ordine = st.text_input('N° ORDINE', key=f"ord_{row['ID']}")
+                    congr = st.selectbox('CONGRUENZA (SI/NO)', ['SI', 'NO'], key=f"cong_tab3_{row['ID']}")
+                    ordine = st.text_input('N° ORDINE', key=f"ord_tab3_{row['ID']}")
 
                 with c2:
                     data_rese = st.date_input(
                         'DATA RESE/RIES',
                         value=date.today(),
                         format='DD/MM/YYYY',
-                        key=f"rese_{row['ID']}"
+                        key=f"rese_tab3_{row['ID']}"
                     )
                     invia = st.checkbox(
                         'Invia email di chiusura alla Control Room Regionale',
                         value=True,
-                        key=f"mail_close_{row['ID']}"
+                        key=f"mail_close_tab3_{row['ID']}"
                     )
 
-                note = st.text_area('NOTE RISCONTRO', key=f"note_{row['ID']}", height=100)
+                note = st.text_area('NOTE RISCONTRO', key=f"note_tab3_{row['ID']}", height=100)
 
-                if st.button(f"Chiudi segnalazione {row['ID']}", key=f"close_{row['ID']}", use_container_width=True):
+                if st.button(f"Chiudi segnalazione {row['ID']}", key=f"close_tab3_{row['ID']}", use_container_width=True):
                     mask = df['ID'].astype(str) == str(row['ID'])
                     df.loc[mask, 'CONGRUENZA (SI/NO)'] = congr
                     df.loc[mask, 'NOTE RISCONTRO'] = note
@@ -540,26 +664,6 @@ def main():
 
                     st.success('Segnalazione chiusa e archiviata.')
                     st.rerun()
-
-    with tab3:
-        st.subheader('Segnalazioni trattate')
-        tr = df[df['STATO'] == 'TRATTATA'].copy()
-
-        filtro = st.selectbox('Filtra per DR', ['TUTTE'] + dr_list)
-        if filtro != 'TUTTE':
-            tr = tr[tr['DR'] == filtro]
-
-        if tr.empty:
-            st.info('Non ci sono segnalazioni trattate.')
-
-        for _, row in tr.sort_values(by='ULTIMO AGGIORNAMENTO', ascending=False).iterrows():
-            card(row)
-            st.caption(
-                f"Data rientro: {fmt_date(row['DATA RIENTRO'])} | "
-                f"Data RESE/RIES: {fmt_date(row['DATA RESE/RIES'])} | "
-                f"Congruenza: {txt(row['CONGRUENZA (SI/NO)'])} | "
-                f"N° Ordine: {txt(row['N° ORDINE'])}"
-            )
 
     with tab4:
         st.subheader('Configurazione email regionali')
@@ -610,10 +714,30 @@ def main():
 
     with tab5:
         st.subheader('Archivio completo')
+
         view = df.copy()
         for c in ['DATA ANORMALITA', 'DATA PRESA IN CARICO', 'DATA RIENTRO', 'DATA RESE/RIES']:
             view[c] = view[c].apply(fmt_date)
-        st.dataframe(view.fillna(''), use_container_width=True, hide_index=True)
+
+        view = view.fillna('')
+
+        c1, c2 = st.columns([3, 1])
+
+        with c1:
+            st.dataframe(view, use_container_width=True, hide_index=True)
+
+        with c2:
+            excel_bytes = dataframe_to_excel_bytes(view)
+            nome_file = f"Archivio_Rientri_Manutentivi_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+            st.download_button(
+                label="Scarica archivio Excel",
+                data=excel_bytes,
+                file_name=nome_file,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
 
 
 if __name__ == '__main__':
