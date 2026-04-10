@@ -82,27 +82,7 @@ def txt(v):
 
 
 def send_outlook(to, cc, subject, body):
-    try:
-        import win32com.client as win32
-
-        outlook = win32.Dispatch('Outlook.Application')
-        mail = outlook.CreateItem(0)
-        mail.To = to
-        if cc:
-            mail.CC = cc
-        mail.Subject = subject
-        mail.Body = body
-        mail.Display()
-
-        return True, 'Email aperta in Outlook. Controlla e premi Invia.'
-
-    except Exception as e:
-        try:
-            import webbrowser
-            webbrowser.open(mailto(to, cc, subject, body))
-            return True, f'Outlook desktop non disponibile. Ho aperto la bozza email col client predefinito. Dettaglio: {e}'
-        except Exception as e2:
-            return False, f'Apertura Outlook non riuscita: {e}. Anche il fallback mailto non è riuscito: {e2}'
+    return False, "Invio automatico non disponibile in questa versione. Usa 'Apri bozza email'."
 
 
 def mailto(to, cc, subject, body):
@@ -194,12 +174,12 @@ def load_segnalazioni():
 
     df = df[ALL_COLUMNS]
     df['STATO'] = df['STATO'].replace('', pd.NA).fillna('TRATTATA')
-    save_df(df)
     return df
 
 
 def save_df(df):
     df.to_excel(SEGNALAZIONI_FILE, index=False)
+
 
 def dataframe_to_excel_bytes(df):
     output = BytesIO()
@@ -207,7 +187,7 @@ def dataframe_to_excel_bytes(df):
         df.to_excel(writer, index=False, sheet_name='Archivio')
     output.seek(0)
     return output.getvalue()
-    
+
 
 def next_id(df):
     prefix = datetime.now().strftime('%Y%m%d')
@@ -475,12 +455,12 @@ def main():
                 ref = cfg['dr_referenti'].get(dr_sel, {'to': '', 'cc': ''})
                 if invia and ref.get('to'):
                     sub, body = subject_new(row), body_new(row)
-                    sent, msg = send_outlook(ref['to'], ref.get('cc', ''), sub, body)
-                    if sent:
-                        st.success(msg)
-                    else:
-                        st.warning(msg)
-                        st.link_button('Apri bozza email', mailto(ref['to'], ref.get('cc', ''), sub, body))
+                    st.info("Invio automatico non disponibile in questa versione cloud.")
+                    st.link_button(
+                        'Apri bozza email',
+                        mailto(ref['to'], ref.get('cc', ''), sub, body),
+                        use_container_width=True
+                    )
                 elif invia:
                     st.warning('Email referenti non configurate per questa DR.')
 
@@ -527,12 +507,12 @@ def main():
 
                     if invia and to:
                         sub, body = subject_takeover(upd), body_takeover(upd)
-                        sent, msg = send_outlook(to, '', sub, body)
-                        if sent:
-                            st.success(msg)
-                        else:
-                            st.warning(msg)
-                            st.link_button('Apri bozza email', mailto(to, '', sub, body))
+                        st.info("Invio automatico non disponibile in questa versione cloud.")
+                        st.link_button(
+                            'Apri bozza email',
+                            mailto(to, '', sub, body),
+                            use_container_width=True
+                        )
 
                     st.success('Segnalazione presa in carico.')
                     st.rerun()
@@ -608,12 +588,12 @@ def main():
 
                         if invia_variazione and to:
                             sub, body = subject_reschedule(upd), body_reschedule(upd, old_date, new_date, txt(motivazione))
-                            sent, msg = send_outlook(to, '', sub, body)
-                            if sent:
-                                st.success(msg)
-                            else:
-                                st.warning(msg)
-                                st.link_button('Apri bozza email', mailto(to, '', sub, body))
+                            st.info("Invio automatico non disponibile in questa versione cloud.")
+                            st.link_button(
+                                'Apri bozza email',
+                                mailto(to, '', sub, body),
+                                use_container_width=True
+                            )
 
                         st.success('Data rientro aggiornata correttamente.')
                         st.rerun()
@@ -655,12 +635,12 @@ def main():
 
                     if invia and to:
                         sub, body = subject_closed(upd), body_closed(upd)
-                        sent, msg = send_outlook(to, '', sub, body)
-                        if sent:
-                            st.success(msg)
-                        else:
-                            st.warning(msg)
-                            st.link_button('Apri bozza email', mailto(to, '', sub, body))
+                        st.info("Invio automatico non disponibile in questa versione cloud.")
+                        st.link_button(
+                            'Apri bozza email',
+                            mailto(to, '', sub, body),
+                            use_container_width=True
+                        )
 
                     st.success('Segnalazione chiusa e archiviata.')
                     st.rerun()
@@ -739,6 +719,6 @@ def main():
             )
 
 
-
 if __name__ == '__main__':
     main()
+
