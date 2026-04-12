@@ -7,13 +7,16 @@ from io import BytesIO
 
 import pandas as pd
 import streamlit as st
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
 APP_TITLE = "Rientri Manutentivi"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSET_FILE = os.path.join(BASE_DIR, "asset DOR.xlsx")
-SEGNALAZIONI_FILE = os.path.join(BASE_DIR, "Rientrimanutentivi.xlsx")
 CONFIG_FILE = os.path.join(BASE_DIR, "config_email.json")
 LOGO_FILE = os.path.join(BASE_DIR, "regionale.png")
+
+GOOGLE_SHEET_NAME = "RientriManutentivi"
 
 DR_LIST_DEFAULT = [
     'ABRUZZO', 'CALABRIA', 'CAMPANIA', 'FRIULI-VENEZIA GIULIA', 'LAZIO',
@@ -157,16 +160,47 @@ def load_asset():
     return out
 
 
+def connect_gsheet():
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(
+        dict(st.secrets["gcp_service_account"]),
+        scope
+    )
+    client = gspread.authorize(creds)
+    sheet = client.open(GOOGLE_SHEET_NAME).sheet1
+    return sheet
+
+
+def ensure_gsheet_headers():
+    sheet = connect_gsheet()
+    header = sheet.row_values(1)
+
+    if not header:
+        sheet.append_row(ALL_COLUMNS)
+        return
+
+    header = [str(x).strip() for x in header]
+    if header != ALL_COLUMNS:
+        raise ValueError(
+            "Le intestazioni del Google Sheet non coincidono con quelle attese. "
+            "Controlla la prima riga del foglio."
+        )
+
+
 def load_segnalazioni():
-    if os.path.exists(SEGNALAZIONI_FILE):
-        df = pd.read_excel(SEGNALAZIONI_FILE)
+    ensure_gsheet_headers()
+    sheet = connect_gsheet()
+    values = sheet.get_all_values()
+
+    if not values or len(values) == 1:
+        df = pd.DataFrame(columns=ALL_COLUMNS)
     else:
-        df = pd.DataFrame()
-
-    df = df.rename(columns={c: str(c).strip() for c in df.columns})
-
-    if "GRAVITA'" in df.columns and "GRAVITA" not in df.columns:
-        df = df.rename(columns={"GRAVITA'": "GRAVITA"})
+        header = [str(c).strip() for c in values[0]]
+        rows = values[1:]
+        df = pd.DataFrame(rows, columns=header)
 
     for c in ALL_COLUMNS:
         if c not in df.columns:
@@ -178,7 +212,13 @@ def load_segnalazioni():
 
 
 def save_df(df):
-    df.to_excel(SEGNALAZIONI_FILE, index=False)
+    ensure_gsheet_headers()
+    sheet = connect_gsheet()
+    df_to_save = df.copy().fillna('').astype(str)
+
+    all_rows = [ALL_COLUMNS] + df_to_save[ALL_COLUMNS].values.tolist()
+    sheet.clear()
+    sheet.update('A1', all_rows)
 
 
 def dataframe_to_excel_bytes(df):
@@ -191,6 +231,8 @@ def dataframe_to_excel_bytes(df):
 
 def next_id(df):
     prefix = datetime.now().strftime('%Y%m%d')
+    if df.empty or 'ID' not in df.columns:
+        return f'{prefix}-001'
     existing = df['ID'].astype(str).fillna('')
     count = existing[existing.str.startswith(prefix + '-')].shape[0] + 1
     return f'{prefix}-{count:03d}'
@@ -392,10 +434,14 @@ def main():
     init_mail_state()
     render_header()
 
-    asset = load_asset()
-    dr_list = sorted(set(DR_LIST_DEFAULT) | set(asset['DR'].dropna().astype(str).str.strip().tolist()))
-    cfg = ensure_config(dr_list)
-    df = load_segnalazioni()
+    try:
+        asset = load_asset()
+        dr_list = sorted(set(DR_LIST_DEFAULT) | set(asset['DR'].dropna().astype(str).str.strip().tolist()))
+        cfg = ensure_config(dr_list)
+        df = load_segnalazioni()
+    except Exception as e:
+        st.error(f"Errore inizializzazione applicazione: {e}")
+        st.stop()
 
     m1, m2, m3 = st.columns(3)
     m1.metric('Non trattate', int((df['STATO'] == 'APERTA').sum()))
@@ -478,7 +524,7 @@ def main():
                     'DR': dr_sel,
                     'ROTABILE': txt(rotabile_finale),
                     'IMC': txt(imc_finale),
-                    'DATA ANORMALITA': pd.to_datetime(data_an),
+                    'DATA ANORMALITA': pd.to_datetime(data_an).strftime('%Y-%m-%d'),
                     'AVARIA': avaria.strip(),
                     'N° AVVISO': txt(n_avviso),
                     'GRAVITA': grav,
@@ -513,8 +559,6 @@ def main():
                 elif invia:
                     st.warning('Email referenti non configurate per questa DR.')
 
-                st.cache_data.clear()
-
     with tab2:
         st.subheader('Segnalazioni non trattate / In carico (a cura GT)')
         render_pending_mail('takeover')
@@ -545,8 +589,8 @@ def main():
 
                 if st.button(f"Presa in carico e apri bozza mail {row['ID']}", key=f"presa_{row['ID']}", use_container_width=True):
                     mask = df['ID'].astype(str) == str(row['ID'])
-                    df.loc[mask, 'DATA PRESA IN CARICO'] = pd.to_datetime(datetime.now().date())
-                    df.loc[mask, 'DATA RIENTRO'] = pd.to_datetime(data_rientro)
+                    df.loc[mask, 'DATA PRESA IN CARICO'] = datetime.now().strftime('%Y-%m-%d')
+                    df.loc[mask, 'DATA RIENTRO'] = pd.to_datetime(data_rientro).strftime('%Y-%m-%d')
                     df.loc[mask, 'STATO'] = 'IN_CARICO'
                     df.loc[mask, 'ULTIMO AGGIORNAMENTO'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     save_df(df)
@@ -630,7 +674,7 @@ def main():
                         mask = df['ID'].astype(str) == str(row['ID'])
                         old_date = fmt_date(df.loc[mask, 'DATA RIENTRO'].iloc[0])
 
-                        df.loc[mask, 'DATA RIENTRO'] = pd.to_datetime(nuova_data)
+                        df.loc[mask, 'DATA RIENTRO'] = pd.to_datetime(nuova_data).strftime('%Y-%m-%d')
                         df.loc[mask, 'MOTIVAZIONE CAMBIO RIENTRO'] = txt(motivazione)
                         df.loc[mask, 'ULTIMO AGGIORNAMENTO'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         save_df(df)
@@ -679,7 +723,7 @@ def main():
                     df.loc[mask, 'CONGRUENZA (SI/NO)'] = congr
                     df.loc[mask, 'NOTE RISCONTRO'] = note
                     df.loc[mask, 'N° ORDINE'] = ordine
-                    df.loc[mask, 'DATA RESE/RIES'] = pd.to_datetime(data_rese)
+                    df.loc[mask, 'DATA RESE/RIES'] = pd.to_datetime(data_rese).strftime('%Y-%m-%d')
                     df.loc[mask, 'STATO'] = 'TRATTATA'
                     df.loc[mask, 'ULTIMO AGGIORNAMENTO'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                     save_df(df)
@@ -776,5 +820,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
