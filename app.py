@@ -792,76 +792,76 @@ def main():
             st.rerun()
 
     with tab5:
-    st.subheader('Archivio completo')
-
-    filtro1, filtro2, filtro3 = st.columns(3)
-
-    with filtro1:
-        rotabili_archivio = sorted([
-            x for x in df['ROTABILE'].dropna().astype(str).str.strip().unique().tolist()
-            if x and x.lower() != 'nan'
-        ])
-        rotabile_sel = st.selectbox(
-            'Filtra per ROTABILE',
-            ['TUTTI'] + rotabili_archivio,
-            key='archivio_rotabile'
-        )
-
-    with filtro2:
-        data_presa_da = st.date_input(
-            'DATA PRESA IN CARICO da',
-            value=None,
-            format='DD/MM/YYYY',
-            key='archivio_data_da'
-        )
-
-    with filtro3:
-        data_presa_a = st.date_input(
-            'DATA PRESA IN CARICO a',
-            value=None,
-            format='DD/MM/YYYY',
-            key='archivio_data_a'
-        )
-
-    view_raw = df.copy()
-
-    if rotabile_sel != 'TUTTI':
-        view_raw = view_raw[view_raw['ROTABILE'].astype(str).str.strip() == rotabile_sel]
-
-    data_presa_series = pd.to_datetime(view_raw['DATA PRESA IN CARICO'], errors='coerce')
-
-    if data_presa_da is not None:
-        view_raw = view_raw[data_presa_series >= pd.to_datetime(data_presa_da)]
+        st.subheader('Archivio completo')
+    
+        filtro1, filtro2, filtro3 = st.columns(3)
+    
+        with filtro1:
+            rotabili_archivio = sorted([
+                x for x in df['ROTABILE'].dropna().astype(str).str.strip().unique().tolist()
+                if x and x.lower() != 'nan'
+            ])
+            rotabile_sel = st.selectbox(
+                'Filtra per ROTABILE',
+                ['TUTTI'] + rotabili_archivio,
+                key='archivio_rotabile'
+            )
+    
+        with filtro2:
+            data_presa_da = st.date_input(
+                'DATA PRESA IN CARICO da',
+                value=None,
+                format='DD/MM/YYYY',
+                key='archivio_data_da'
+            )
+    
+        with filtro3:
+            data_presa_a = st.date_input(
+                'DATA PRESA IN CARICO a',
+                value=None,
+                format='DD/MM/YYYY',
+                key='archivio_data_a'
+            )
+    
+        view_raw = df.copy()
+    
+        if rotabile_sel != 'TUTTI':
+            view_raw = view_raw[view_raw['ROTABILE'].astype(str).str.strip() == rotabile_sel]
+    
         data_presa_series = pd.to_datetime(view_raw['DATA PRESA IN CARICO'], errors='coerce')
-
-    if data_presa_a is not None:
-        view_raw = view_raw[data_presa_series <= pd.to_datetime(data_presa_a)]
-        data_presa_series = pd.to_datetime(view_raw['DATA PRESA IN CARICO'], errors='coerce')
-
-    st.caption(f"Record trovati: {len(view_raw)}")
-
-    view = view_raw.copy()
-    for c in ['DATA ANORMALITA', 'DATA PRESA IN CARICO', 'DATA RIENTRO', 'DATA RESE/RIES']:
-        view[c] = view[c].apply(fmt_date)
-
-    view = view.fillna('')
-
-    c1, c2 = st.columns([3, 1])
-
-    with c1:
-        st.dataframe(view, use_container_width=True, hide_index=True)
-
-    with c2:
-        excel_bytes = dataframe_to_excel_bytes(view)
-        nome_file = f"Archivio_Rientri_Manutentivi_Filtrato_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
-
-        st.download_button(
-            label="Scarica Excel filtrato",
-            data=excel_bytes,
-            file_name=nome_file,
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
-        )
+    
+        if data_presa_da is not None:
+            view_raw = view_raw[data_presa_series >= pd.to_datetime(data_presa_da)]
+            data_presa_series = pd.to_datetime(view_raw['DATA PRESA IN CARICO'], errors='coerce')
+    
+        if data_presa_a is not None:
+            view_raw = view_raw[data_presa_series <= pd.to_datetime(data_presa_a)]
+            data_presa_series = pd.to_datetime(view_raw['DATA PRESA IN CARICO'], errors='coerce')
+    
+        st.caption(f"Record trovati: {len(view_raw)}")
+    
+        view = view_raw.copy()
+        for c in ['DATA ANORMALITA', 'DATA PRESA IN CARICO', 'DATA RIENTRO', 'DATA RESE/RIES']:
+            view[c] = view[c].apply(fmt_date)
+    
+        view = view.fillna('')
+    
+        c1, c2 = st.columns([3, 1])
+    
+        with c1:
+            st.dataframe(view, use_container_width=True, hide_index=True)
+    
+        with c2:
+            excel_bytes = dataframe_to_excel_bytes(view)
+            nome_file = f"Archivio_Rientri_Manutentivi_Filtrato_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    
+            st.download_button(
+                label="Scarica Excel filtrato",
+                data=excel_bytes,
+                file_name=nome_file,
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
 
 
 if __name__ == '__main__':
