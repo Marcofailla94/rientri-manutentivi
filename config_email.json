@@ -1,17 +1,17 @@
 {
-  "control_room_email": "m.failla@trenitalia.it",
+  "control_room_email": "ControlRoomRegionale@trenitalia.it",
   "dr_referenti": {
     "ABRUZZO": {
-      "to": "",
-      "cc": ""
+      "to": "GestoreTreno.IMC.AB@trenitalia.it,ANTO.ROSSI@trenitalia.it,l.damico@trenitalia.it",
+      "cc": "ch.dimichele@trenitalia.it,fa.guala@trenitalia.it,Piazzale.IMC.AB@trenitalia.it"
     },
     "CALABRIA": {
-      "to": "",
-      "cc": ""
+      "to": "Piazzale.oml-rc@trenitalia.it,lu.genovese@trenitalia.it,st.filippone@trenitalia.it,fr.cotroneo@trenitalia.it,an.mumoli@trenitalia.it,fa.raimondo@trenitalia.it",
+      "cc": "g.quagliata@trenitalia.it,f.triulcio@trenitalia.it"
     },
     "CAMPANIA": {
-      "to": "",
-      "cc": ""
+      "to": "GestoreTreno_NA_CF@trenitalia.it,Ni.Pastore@trenitalia.it,s.fatalo@trenitalia.it",
+      "cc": "g.amato@trenitalia.it,v.pavone@trenitalia.it"
     },
     "FRIULI-VENEZIA GIULIA": {
       "to": "",
@@ -22,36 +22,36 @@
       "cc": ""
     },
     "MARCHE": {
-      "to": "",
-      "cc": ""
+      "to": "GT_Ancona@trenitalia.it,c.manzotti@trenitalia.it,n.bastianelli@trenitalia.it",
+      "cc": "t.tarini@trenitalia.it,ma.ciuchini@trenitalia.it"
     },
     "PIEMONTE": {
-      "to": "",
-      "cc": ""
+      "to": "gtimctorino@trenitalia.it,a.pasotto@trenitalia.it,g.burgio@trenitalia.it",
+      "cc": "p.carnevale@trenitalia.it,g.concilio@trenitalia.it,i.vittoria@trenitalia.it"
     },
     "PUGLIA": {
-      "to": "",
-      "cc": ""
+      "to": "piazzaleimcfoggia@trenitalia.it,ufficio303taranto@trenitalia.it,V.Faleo@trenitalia.it,dome.martino@trenitalia.it",
+      "cc": "m.clavica@trenitalia.it,v.chiantone@trenitalia.it,P.Barbitta@trenitalia.it"
     },
     "SARDEGNA": {
       "to": "",
       "cc": ""
     },
     "SICILIA": {
-      "to": "m.failla@trenitalia.it",
-      "cc": ""
+      "to": "piazzaleimcpalermo@trenitalia.it,piazz_chiovara_pa@trenitalia.it,g.lacorte@trenitalia.it,g.dragotto@trenitalia.it",
+      "cc": "s.migliazzo@trenitalia.it,m.cataldo@trenitalia.it"
     },
     "TOSCANA": {
-      "to": "",
-      "cc": ""
+      "to": "cto.osmannoro@trenitalia.it,g.stanganini@trenitalia.it,a.naldini@trenitalia.it,ri.salomoni@trenitalia.it,j.nasta@trenitalia.it,p.cervo@trenitalia.it,l.battimiello@trenitalia.it",
+      "cc": "a.cera@trenitalia.it,m.ciabini@trenitalia.it"
     },
     "TRENTINO-ALTO ADIGE": {
-      "to": "",
-      "cc": ""
+      "to": "Gegestoretreno.bz@trenitalia.it,C.Salerno2@trenitalia.it",
+      "cc": "g.mancuso@trenitalia.it,s.cupelli@trenitalia.it"
     },
     "VENETO": {
-      "to": "",
-      "cc": ""
+      "to": "GestoreTreno_DPR_MS@trenitalia.it,a.isotti@trenitalia.it,ro.velotti@trenitalia.it",
+      "cc": "r.residori@trenitalia.it,S.Scarpa@trenitalia.it"
     }
   }
 }
