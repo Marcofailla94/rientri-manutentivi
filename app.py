@@ -35,6 +35,7 @@ ALL_COLUMNS = [
     'GRAVITA',
     'DATA PRESA IN CARICO',
     'DATA RIENTRO',
+    'DATA NOTIFICA RIENTRO',
     'CONGRUENZA (SI/NO)',
     'NOTE RISCONTRO',
     'N° ORDINE',
@@ -49,6 +50,7 @@ ALL_COLUMNS = [
 STATUS_COLORS = {
     'APERTA': '#ffd9d9',
     'IN_CARICO': '#fff2b3',
+    'RIENTRATO': '#daf2d0',
     'TRATTATA': '#daf2d0',
     'FUORI_RANGE': '#ffd8a8'
 }
@@ -56,6 +58,7 @@ STATUS_COLORS = {
 STATUS_LABELS = {
     'APERTA': 'NON TRATTATA',
     'IN_CARICO': 'PRESA IN CARICO',
+    'RIENTRATO': 'RIENTRATO IN IMPIANTO',
     'TRATTATA': 'TRATTATA'
 }
 
@@ -175,12 +178,12 @@ def ensure_config(dr_list):
             cfg = json.load(f)
     else:
         cfg = {
-            'control_room_email': 'm.failla@trenitalia.it',
+            'control_room_email': 'ControlRoomRegionale@trenitalia.it',
             'dr_referenti': {}
         }
 
     cfg.setdefault('dr_referenti', {})
-    cfg.setdefault('control_room_email', 'm.failla@trenitalia.it')
+    cfg.setdefault('control_room_email', 'ControlRoomRegionale@trenitalia.it')
 
     for dr in dr_list:
         cfg['dr_referenti'].setdefault(dr, {'to': '', 'cc': ''})
@@ -369,23 +372,37 @@ def subject_takeover(row):
 
 
 def body_takeover(row):
-    data_rientro = fmt_date(row["DATA RIENTRO"])
-    rotabile = row["ROTABILE"]
-    imc = row["IMC"]
-    dr = row["DR"]
-    gravita = row["GRAVITA"]
-    avviso = row["N° AVVISO"]
-
     return f"""Buongiorno,
 si comunica la presa visione e presa in carico della richiesta.
 È stato stabilito con la SOR Regionale il rientro manutentivo nella seguente data:
 
-- Data rientro: {data_rientro}
-- Rotabile: {rotabile}
-- IMC: {imc}
-- DR: {dr}
-- Gravità: {gravita}
-- N° avviso: {avviso}
+- Data rientro: {fmt_date(row["DATA RIENTRO"])}
+- Rotabile: {row["ROTABILE"]}
+- IMC: {row["IMC"]}
+- DR: {row["DR"]}
+- Gravità: {row["GRAVITA"]}
+- N° avviso: {row["N° AVVISO"]}
+"""
+
+
+def subject_notify_return(row):
+    return f"Notifica rientro in impianto {row['ROTABILE']} - {row['IMC']} - {row['DR']}"
+
+
+def body_notify_return(row):
+    return f"""Buongiorno,
+si comunica che il rotabile risulta rientrato presso l'impianto di manutenzione.
+
+Dettagli della segnalazione:
+- ID Segnalazione: {row['ID']}
+- Rotabile: {row['ROTABILE']}
+- IMC: {row['IMC']}
+- DR: {row['DR']}
+- Gravità: {row['GRAVITA']}
+- N° avviso: {row['N° AVVISO']}
+- Data presa in carico: {fmt_date(row['DATA PRESA IN CARICO'])}
+- Data rientro pianificata: {fmt_date(row['DATA RIENTRO'])}
+- Data notifica rientro in impianto: {fmt_date(row['DATA NOTIFICA RIENTRO'])}
 """
 
 
@@ -444,7 +461,9 @@ def card(row):
 
     extra = ""
     if motivazione:
-        extra = f'<div style="margin-top:6px;color:#7a5c00;"><b>Motivazione ultimo cambio rientro:</b> {motivazione}</div>'
+        extra += f'<div style="margin-top:6px;color:#7a5c00;"><b>Motivazione ultimo cambio rientro:</b> {motivazione}</div>'
+    if txt(row.get('DATA NOTIFICA RIENTRO', '')):
+        extra += f'<div style="margin-top:6px;color:#0b6b2e;"><b>Data notifica rientro:</b> {fmt_date(row["DATA NOTIFICA RIENTRO"])}</div>'
 
     st.markdown(
         f'''
@@ -468,6 +487,7 @@ def render_header():
     .t2{color:#0b6b2e;font-weight:800;font-size:22px;line-height:1.2;margin:6px 0 0 0;}
     .t3{color:#0b6b2e;font-weight:800;font-size:18px;line-height:1.2;margin:4px 0 0 0;}
     .pill{display:inline-block;margin-top:10px;padding:6px 12px;border-radius:999px;background:#0b6b2e;color:#fff;font-weight:700;}
+    .legend-box{padding:8px 12px;border-radius:10px;border:1px solid #ddd;font-weight:700;text-align:center;}
     </style>
     ''', unsafe_allow_html=True)
 
@@ -488,6 +508,19 @@ def render_header():
             st.image(LOGO_FILE, use_container_width=True)
         else:
             st.warning('Inserisci regionale.png nella cartella del progetto.')
+
+
+def render_legend():
+    st.markdown("**Legenda colori**")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        st.markdown('<div class="legend-box" style="background:#ffd9d9;">Rosso = Non trattata</div>', unsafe_allow_html=True)
+    with c2:
+        st.markdown('<div class="legend-box" style="background:#fff2b3;">Giallo = Presa in carico</div>', unsafe_allow_html=True)
+    with c3:
+        st.markdown('<div class="legend-box" style="background:#daf2d0;">Verde = Rientrato / Trattata</div>', unsafe_allow_html=True)
+    with c4:
+        st.markdown('<div class="legend-box" style="background:#ffd8a8;">Arancione = Fuori range</div>', unsafe_allow_html=True)
 
 
 def init_mail_state():
@@ -553,6 +586,7 @@ def main():
     st.set_page_config(page_title=APP_TITLE, layout='wide')
     init_mail_state()
     render_header()
+    render_legend()
 
     current_role = st.session_state.user_role
     is_control_room = current_role == 'Control Room'
@@ -575,7 +609,7 @@ def main():
     m1, m2, m3 = st.columns(3)
     m1.metric('Non trattate', int((df['STATO'] == 'APERTA').sum()))
     m2.metric('Prese in carico', int((df['STATO'] == 'IN_CARICO').sum()))
-    m3.metric('Trattate', int((df['STATO'] == 'TRATTATA').sum()))
+    m3.metric('Verdi (Rientrate/Trattate)', int(((df['STATO'] == 'RIENTRATO') | (df['STATO'] == 'TRATTATA')).sum()))
 
     if is_dr_user:
         tab2, tab3, tab4, tab5 = st.tabs([
@@ -667,6 +701,7 @@ def main():
                         'GRAVITA': grav,
                         'DATA PRESA IN CARICO': '',
                         'DATA RIENTRO': '',
+                        'DATA NOTIFICA RIENTRO': '',
                         'CONGRUENZA (SI/NO)': '',
                         'NOTE RISCONTRO': '',
                         'N° ORDINE': '',
@@ -771,10 +806,11 @@ def main():
 
     with tab3:
         st.subheader('Segnalazioni in carico (a cura GT o referente IMC)')
+        render_pending_mail('notify_return')
         render_pending_mail('reschedule')
         render_pending_mail('close')
 
-        carico_tab3 = df[df['STATO'] == 'IN_CARICO'].copy()
+        carico_tab3 = df[df['STATO'].isin(['IN_CARICO', 'RIENTRATO'])].copy()
 
         if is_dr_user:
             filtro_tab3 = current_role
@@ -792,8 +828,45 @@ def main():
             card(row)
             st.caption(
                 f"Data presa in carico: {fmt_date(row['DATA PRESA IN CARICO'])} | "
-                f"Data rientro attuale: {fmt_date(row['DATA RIENTRO'])}"
+                f"Data rientro attuale: {fmt_date(row['DATA RIENTRO'])} | "
+                f"Data notifica rientro: {fmt_date(row['DATA NOTIFICA RIENTRO'])}"
             )
+
+            with st.expander(f"Notifica rientro {row['ID']}"):
+                data_notifica_rientro = st.date_input(
+                    'Data effettiva rientro in impianto',
+                    value=pd.to_datetime(row['DATA NOTIFICA RIENTRO']).date() if txt(row['DATA NOTIFICA RIENTRO']) else date.today(),
+                    format='DD/MM/YYYY',
+                    key=f"notifica_rientro_{row['ID']}"
+                )
+                invia_notifica = st.checkbox(
+                    'Invia email di notifica rientro alla Control Room Regionale',
+                    value=True,
+                    key=f"mail_notifica_rientro_{row['ID']}"
+                )
+
+                if st.button(f"Notifica rientro e apri bozza mail {row['ID']}", key=f"btn_notifica_rientro_{row['ID']}", use_container_width=True):
+                    mask = df_all['ID'].astype(str) == str(row['ID'])
+                    df_all.loc[mask, 'DATA NOTIFICA RIENTRO'] = pd.to_datetime(data_notifica_rientro).strftime('%Y-%m-%d')
+                    df_all.loc[mask, 'STATO'] = 'RIENTRATO'
+                    df_all.loc[mask, 'ULTIMO AGGIORNAMENTO'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    save_df(df_all)
+
+                    upd = df_all.loc[mask].iloc[0].to_dict()
+                    to = cfg.get('control_room_email', '')
+
+                    if invia_notifica and to:
+                        sub, body = subject_notify_return(upd), body_notify_return(upd)
+                        set_pending_mail(
+                            'notify_return',
+                            mailto(to, '', sub, body),
+                            sub,
+                            body,
+                            "Bozza email pronta per la notifica di rientro in impianto."
+                        )
+                        st.rerun()
+
+                    st.success('Rientro notificato correttamente.')
 
             with st.expander(f"Riprogramma / Ritratta segnalazione {row['ID']}"):
                 nuova_data = st.date_input(
@@ -1025,7 +1098,7 @@ def main():
         st.caption(f"Record trovati: {len(view_raw)}")
 
         view = view_raw.copy()
-        for c in ['DATA ANORMALITA', 'DATA PRESA IN CARICO', 'DATA RIENTRO', 'DATA RESE/RIES']:
+        for c in ['DATA ANORMALITA', 'DATA PRESA IN CARICO', 'DATA RIENTRO', 'DATA NOTIFICA RIENTRO', 'DATA RESE/RIES']:
             view[c] = view[c].apply(fmt_date)
 
         view = view.fillna('')
@@ -1050,6 +1123,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
