@@ -7,8 +7,7 @@ from io import BytesIO
 
 import pandas as pd
 import streamlit as st
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
+from supabase import create_client, Client
 
 APP_TITLE = "Rientri Manutentivi"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -16,7 +15,7 @@ ASSET_FILE = os.path.join(BASE_DIR, "asset DOR.xlsx")
 CONFIG_FILE = os.path.join(BASE_DIR, "config_email.json")
 LOGO_FILE = os.path.join(BASE_DIR, "regionale.png")
 
-GOOGLE_SHEET_NAME = "RientriManutentivi"
+SUPABASE_TABLE_NAME = "rientri_manutentivi"
 
 DR_LIST_DEFAULT = [
     'ABRUZZO', 'CALABRIA', 'CAMPANIA', 'FRIULI-VENEZIA GIULIA', 'LAZIO',
@@ -62,6 +61,31 @@ STATUS_LABELS = {
     'TRATTATA': 'TRATTATA'
 }
 
+DB_TO_UI_MAP = {
+    'id': 'ID',
+    'dr': 'DR',
+    'rotabile': 'ROTABILE',
+    'imc': 'IMC',
+    'data_anormalita': 'DATA ANORMALITA',
+    'avaria': 'AVARIA',
+    'n_avviso': 'N° AVVISO',
+    'gravita': 'GRAVITA',
+    'data_presa_in_carico': 'DATA PRESA IN CARICO',
+    'data_rientro': 'DATA RIENTRO',
+    'data_notifica_rientro': 'DATA NOTIFICA RIENTRO',
+    'congruenza': 'CONGRUENZA (SI/NO)',
+    'note_riscontro': 'NOTE RISCONTRO',
+    'n_ordine': 'N° ORDINE',
+    'data_rese_ries': 'DATA RESE/RIES',
+    'stato': 'STATO',
+    'data_creazione': 'DATA CREAZIONE',
+    'ultimo_aggiornamento': 'ULTIMO AGGIORNAMENTO',
+    'motivazione_cambio_rientro': 'MOTIVAZIONE CAMBIO RIENTRO',
+    'powerapps_id': '__PowerAppsId__'
+}
+
+UI_TO_DB_MAP = {v: k for k, v in DB_TO_UI_MAP.items()}
+
 
 def fmt_date(v):
     if v is None or v == '':
@@ -88,6 +112,26 @@ def txt(v):
     return str(v).strip()
 
 
+def normalize_date_for_db(v):
+    value = txt(v)
+    if not value:
+        return None
+    dt = pd.to_datetime(value, errors='coerce')
+    if pd.isna(dt):
+        return None
+    return dt.strftime('%Y-%m-%d')
+
+
+def normalize_timestamp_for_db(v):
+    value = txt(v)
+    if not value:
+        return None
+    dt = pd.to_datetime(value, errors='coerce')
+    if pd.isna(dt):
+        return None
+    return dt.strftime('%Y-%m-%d %H:%M:%S')
+
+
 def send_outlook(to, cc, subject, body):
     return False, "Invio automatico non disponibile in questa versione. Usa 'Apri bozza email'."
 
@@ -97,6 +141,12 @@ def mailto(to, cc, subject, body):
     if cc:
         url += f"&cc={quote(cc)}"
     return url
+
+
+def get_supabase_client() -> Client:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
 
 
 def build_password_map(dr_list):
@@ -237,47 +287,15 @@ def load_asset():
     return out
 
 
-def connect_gsheet():
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive"
-    ]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(
-        dict(st.secrets["gcp_service_account"]),
-        scope
-    )
-    client = gspread.authorize(creds)
-    sheet = client.open(GOOGLE_SHEET_NAME).sheet1
-    return sheet
-
-
-def ensure_gsheet_headers():
-    sheet = connect_gsheet()
-    header = sheet.row_values(1)
-
-    if not header:
-        sheet.append_row(ALL_COLUMNS)
-        return
-
-    header = [str(x).strip() for x in header]
-    if header != ALL_COLUMNS:
-        raise ValueError(
-            "Le intestazioni del Google Sheet non coincidono con quelle attese. "
-            "Controlla la prima riga del foglio."
-        )
-
-
 def load_segnalazioni():
-    ensure_gsheet_headers()
-    sheet = connect_gsheet()
-    values = sheet.get_all_values()
+    client = get_supabase_client()
+    response = client.table(SUPABASE_TABLE_NAME).select("*").execute()
+    rows = response.data or []
 
-    if not values or len(values) == 1:
+    if not rows:
         df = pd.DataFrame(columns=ALL_COLUMNS)
     else:
-        header = [str(c).strip() for c in values[0]]
-        rows = values[1:]
-        df = pd.DataFrame(rows, columns=header)
+        df = pd.DataFrame(rows).rename(columns=DB_TO_UI_MAP)
 
     for c in ALL_COLUMNS:
         if c not in df.columns:
@@ -289,13 +307,41 @@ def load_segnalazioni():
 
 
 def save_df(df):
-    ensure_gsheet_headers()
-    sheet = connect_gsheet()
-    df_to_save = df.copy().fillna('').astype(str)
+    client = get_supabase_client()
+    df_to_save = df.copy().fillna('')
 
-    all_rows = [ALL_COLUMNS] + df_to_save[ALL_COLUMNS].values.tolist()
-    sheet.clear()
-    sheet.update('A1', all_rows)
+    payload = []
+    for _, row in df_to_save.iterrows():
+        payload.append({
+            'id': txt(row['ID']),
+            'dr': txt(row['DR']),
+            'rotabile': txt(row['ROTABILE']),
+            'imc': txt(row['IMC']),
+            'data_anormalita': normalize_date_for_db(row['DATA ANORMALITA']),
+            'avaria': txt(row['AVARIA']),
+            'n_avviso': txt(row['N° AVVISO']),
+            'gravita': txt(row['GRAVITA']),
+            'data_presa_in_carico': normalize_date_for_db(row['DATA PRESA IN CARICO']),
+            'data_rientro': normalize_date_for_db(row['DATA RIENTRO']),
+            'data_notifica_rientro': normalize_date_for_db(row['DATA NOTIFICA RIENTRO']),
+            'congruenza': txt(row['CONGRUENZA (SI/NO)']),
+            'note_riscontro': txt(row['NOTE RISCONTRO']),
+            'n_ordine': txt(row['N° ORDINE']),
+            'data_rese_ries': normalize_date_for_db(row['DATA RESE/RIES']),
+            'stato': txt(row['STATO']),
+            'data_creazione': normalize_timestamp_for_db(row['DATA CREAZIONE']),
+            'ultimo_aggiornamento': normalize_timestamp_for_db(row['ULTIMO AGGIORNAMENTO']),
+            'motivazione_cambio_rientro': txt(row['MOTIVAZIONE CAMBIO RIENTRO']),
+            'powerapps_id': txt(row['__PowerAppsId__'])
+        })
+
+    if payload:
+        batch_size = 500
+        for i in range(0, len(payload), batch_size):
+            client.table(SUPABASE_TABLE_NAME).upsert(
+                payload[i:i + batch_size],
+                on_conflict="id"
+            ).execute()
 
 
 def dataframe_to_excel_bytes(df):
@@ -589,8 +635,6 @@ def main():
     render_legend()
 
     current_role = st.session_state.user_role
-    is_control_room = current_role == 'Control Room'
-    is_admin = current_role == 'Admin'
     is_dr_user = role_is_dr(current_role, dr_list)
 
     with st.sidebar:
@@ -1123,6 +1167,7 @@ def main():
 
 if __name__ == '__main__':
     main()
+
 
 
 
