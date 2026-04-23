@@ -1,0 +1,362 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="row g-3 mb-3">
+    <div class="col-md-3"><div class="metric-card"><div class="metric-title">Non trattate</div><div class="metric-value">{{ non_trattate }}</div></div></div>
+    <div class="col-md-3"><div class="metric-card"><div class="metric-title">Prese in carico</div><div class="metric-value">{{ prese_in_carico }}</div></div></div>
+    <div class="col-md-3"><div class="metric-card"><div class="metric-title">Verdi</div><div class="metric-value">{{ verdi }}</div></div></div>
+    <div class="col-md-3">
+        <div class="legend-wrap">
+            <div class="legend-box" style="background:#ffd9d9;">Rosso = Non trattata</div>
+            <div class="legend-box" style="background:#fff2b3;">Giallo = Presa in carico</div>
+            <div class="legend-box" style="background:#daf2d0;">Verde = Rientrato / Trattata</div>
+            <div class="legend-box" style="background:#ffd8a8;">Arancione = Fuori range</div>
+        </div>
+    </div>
+</div>
+
+<ul class="nav nav-tabs mb-3">
+    {% if not is_dr_user %}
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab1">Nuova segnalazione</button></li>
+    {% endif %}
+    <li class="nav-item"><button class="nav-link {% if is_dr_user %}active{% endif %}" data-bs-toggle="tab" data-bs-target="#tab2">Non trattate / In carico</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab3">Segnalazioni in carico</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab4">Configurazione email</button></li>
+    <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab5">Archivio</button></li>
+</ul>
+
+<div class="tab-content">
+    {% if not is_dr_user %}
+    <div class="tab-pane fade show active" id="tab1">
+        <div class="card p-3 mb-3">
+            <h4>Nuova segnalazione</h4>
+            <form method="post" action="{{ url_for('nuova') }}">
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label">DR</label>
+                        <select class="form-select" name="dr" required>
+                            {% for dr in dr_list %}
+                            <option value="{{ dr }}">{{ dr }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">IMC</label>
+                        <input class="form-control" name="imc_finale" required>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">ROTABILE</label>
+                        <input class="form-control" name="rotabile_finale" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">DATA ANORMALITA</label>
+                        <input class="form-control" type="date" name="data_an" value="{{ today }}" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">GRAVITA</label>
+                        <select class="form-select" name="gravita" required>
+                            <option>Rientro immediato</option>
+                            <option>Rientro da turno manutentivo</option>
+                            <option>Rientro entro 24 H</option>
+                            <option>Rientro entro 48 H</option>
+                            <option>Rientro entro 72 H</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">N° AVVISO</label>
+                        <input class="form-control" name="n_avviso">
+                    </div>
+                    <div class="col-md-3 d-flex align-items-end">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="invia" checked>
+                            <label class="form-check-label">Invia email ai referenti</label>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">AVARIA</label>
+                        <textarea class="form-control" rows="4" name="avaria" required></textarea>
+                    </div>
+                    <div class="col-12">
+                        <button class="btn btn-success">Salva segnalazione e apri bozza mail</button>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="tab-pane fade {% if is_dr_user %}show active{% endif %}" id="tab2">
+        <div class="card p-3 mb-3">
+            <div class="d-flex justify-content-between align-items-center">
+                <h4 class="mb-0">Segnalazioni non trattate / In carico</h4>
+                <form method="get" class="d-flex gap-2">
+                    <select class="form-select form-select-sm" name="filtro_dr" style="width:260px" {% if is_dr_user %}disabled{% endif %}>
+                        {% if not is_dr_user %}<option value="TUTTE" {% if filtro_dr=='TUTTE' %}selected{% endif %}>TUTTE</option>{% endif %}
+                        {% for dr in dr_list %}
+                        <option value="{{ dr }}" {% if filtro_dr==dr %}selected{% endif %}>{{ dr }}</option>
+                        {% endfor %}
+                    </select>
+                    {% if not is_dr_user %}<button class="btn btn-outline-secondary btn-sm">Filtra</button>{% endif %}
+                </form>
+            </div>
+        </div>
+
+        {% if aperte|length == 0 %}
+        <div class="alert alert-info">Non ci sono segnalazioni aperte.</div>
+        {% endif %}
+
+        {% for row in aperte %}
+        <div class="segn-card" style="background:{{ status_colors.get(row['STATO'], '#fff') }};">
+            <div class="fw-bold">{{ row['ID'] }} | {{ row['ROTABILE'] }}</div>
+            <div class="text-muted">DR: {{ row['DR'] }} | IMC: {{ row['IMC'] }} | Gravità: {{ row['GRAVITA'] }} | Stato: {{ status_labels.get(row['STATO'], row['STATO']) }}</div>
+            <div class="text-muted">Data anormalità: {{ row['DATA ANORMALITA']|replace('00:00:00','') }} | N° avviso: {{ row['N° AVVISO'] }}</div>
+            <div class="mt-2"><b>Avaria:</b> {{ row['AVARIA'] }}</div>
+
+            <div class="mt-3">
+                <form method="post" action="{{ url_for('presa_in_carico', segn_id=row['ID']) }}" class="row g-2 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label">DATA RIENTRO</label>
+                        <input class="form-control" type="date" name="data_rientro" value="{{ today }}" required>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" name="invia" checked>
+                            <label class="form-check-label">Invia email a Control Room Regionale</label>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <button class="btn btn-warning w-100">Presa in carico e apri bozza mail</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+        {% endfor %}
+
+        <div class="card p-3 mt-3">
+            <h5>Segnalazioni prese in carico</h5>
+            {% if carico|length == 0 %}
+            <div class="alert alert-info">Non ci sono segnalazioni in carico.</div>
+            {% endif %}
+            {% for row in carico %}
+            <div class="mini-card">
+                <div class="fw-bold">{{ row['ID'] }} | {{ row['ROTABILE'] }}</div>
+                <div class="text-muted">DR: {{ row['DR'] }} | IMC: {{ row['IMC'] }} | Gravità: {{ row['GRAVITA'] }}</div>
+                <div class="small text-muted">Data presa in carico: {{ row['DATA PRESA IN CARICO'] }} | Data rientro: {{ row['DATA RIENTRO'] }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <div class="tab-pane fade" id="tab3">
+        <div class="card p-3 mb-3"><h4>Segnalazioni in carico</h4></div>
+        {% if carico_tab3|length == 0 %}
+        <div class="alert alert-info">Non ci sono segnalazioni in carico.</div>
+        {% endif %}
+
+        {% for row in carico_tab3 %}
+        <div class="segn-card" style="background:{{ status_colors.get(row['STATO'], '#fff') }};">
+            <div class="fw-bold">{{ row['ID'] }} | {{ row['ROTABILE'] }}</div>
+            <div class="text-muted">DR: {{ row['DR'] }} | IMC: {{ row['IMC'] }} | Gravità: {{ row['GRAVITA'] }} | Stato: {{ status_labels.get(row['STATO'], row['STATO']) }}</div>
+            <div class="small text-muted">Data presa in carico: {{ row['DATA PRESA IN CARICO'] }} | Data rientro: {{ row['DATA RIENTRO'] }} | Data notifica rientro: {{ row['DATA NOTIFICA RIENTRO'] }}</div>
+            {% if row['MOTIVAZIONE CAMBIO RIENTRO'] %}
+            <div class="mt-2 small"><b>Motivazione ultimo cambio rientro:</b> {{ row['MOTIVAZIONE CAMBIO RIENTRO'] }}</div>
+            {% endif %}
+
+            <div class="accordion mt-3" id="acc{{ loop.index }}">
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" data-bs-toggle="collapse" data-bs-target="#not{{ loop.index }}">Notifica rientro</button>
+                    </h2>
+                    <div id="not{{ loop.index }}" class="accordion-collapse collapse">
+                        <div class="accordion-body">
+                            <form method="post" action="{{ url_for('notifica_rientro', segn_id=row['ID']) }}" class="row g-2 align-items-end">
+                                <div class="col-md-4">
+                                    <label class="form-label">Data effettiva rientro in impianto</label>
+                                    <input class="form-control" type="date" name="data_notifica" value="{{ today }}" required>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" name="invia_notifica" checked>
+                                        <label class="form-check-label">Invia email di notifica</label>
+                                    </div>
+                                </div>
+                                <div class="col-md-4">
+                                    <button class="btn btn-success w-100">Notifica rientro e apri bozza mail</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" data-bs-toggle="collapse" data-bs-target="#rip{{ loop.index }}">Riprogramma / Ritratta</button>
+                    </h2>
+                    <div id="rip{{ loop.index }}" class="accordion-collapse collapse">
+                        <div class="accordion-body">
+                            <form method="post" action="{{ url_for('riprogramma', segn_id=row['ID']) }}" class="row g-2">
+                                <div class="col-md-3">
+                                    <label class="form-label">Nuova DATA RIENTRO</label>
+                                    <input class="form-control" type="date" name="nuova_data" value="{{ today }}" required>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Motivazione cambio rientro</label>
+                                    <textarea class="form-control" rows="2" name="motivazione" required></textarea>
+                                </div>
+                                <div class="col-md-3 d-flex align-items-end">
+                                    <div class="w-100">
+                                        <div class="form-check mb-2">
+                                            <input class="form-check-input" type="checkbox" name="invia_variazione" checked>
+                                            <label class="form-check-label">Invia email</label>
+                                        </div>
+                                        <button class="btn btn-warning w-100">Aggiorna rientro e apri bozza mail</button>
+                                    </div>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="accordion-item">
+                    <h2 class="accordion-header">
+                        <button class="accordion-button collapsed" data-bs-toggle="collapse" data-bs-target="#chi{{ loop.index }}">Completa lavorazione</button>
+                    </h2>
+                    <div id="chi{{ loop.index }}" class="accordion-collapse collapse">
+                        <div class="accordion-body">
+                            <form method="post" action="{{ url_for('chiudi', segn_id=row['ID']) }}" class="row g-2">
+                                <div class="col-md-3">
+                                    <label class="form-label">CONGRUENZA</label>
+                                    <select class="form-select" name="congruenza">
+                                        <option>SI</option>
+                                        <option>NO</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">N° ORDINE</label>
+                                    <input class="form-control" name="ordine">
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">DATA RESE/RIES</label>
+                                    <input class="form-control" type="date" name="data_rese" value="{{ today }}" required>
+                                </div>
+                                <div class="col-md-3 d-flex align-items-end">
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" name="invia_close" checked>
+                                        <label class="form-check-label">Invia email chiusura</label>
+                                    </div>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label">NOTE RISCONTRO</label>
+                                    <textarea class="form-control" rows="3" name="note"></textarea>
+                                </div>
+                                <div class="col-12">
+                                    <button class="btn btn-success">Chiudi segnalazione e apri bozza mail</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+
+    <div class="tab-pane fade" id="tab4">
+        <div class="card p-3">
+            <h4>Configurazione email regionali</h4>
+            <form method="post" action="{{ url_for('salva_config') }}">
+                {% if is_dr_user %}
+                <div class="alert alert-info">Puoi modificare solo i riferimenti della tua DR: {{ current_role }}</div>
+                <div class="mb-3">
+                    <label class="form-label">Email Control Room Regionale</label>
+                    <input class="form-control" value="{{ cfg.get('control_room_email','') }}" disabled>
+                </div>
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <label class="form-label">EMAIL TO</label>
+                        <input class="form-control" name="email_to" value="{{ cfg['dr_referenti'][current_role]['to'] }}">
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">EMAIL CC</label>
+                        <input class="form-control" name="email_cc" value="{{ cfg['dr_referenti'][current_role]['cc'] }}">
+                    </div>
+                </div>
+                {% else %}
+                <div class="mb-3">
+                    <label class="form-label">Email Control Room Regionale</label>
+                    <input class="form-control" name="control_room_email" value="{{ cfg.get('control_room_email','') }}">
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm table-bordered align-middle">
+                        <thead><tr><th>DR</th><th>EMAIL TO</th><th>EMAIL CC</th></tr></thead>
+                        <tbody>
+                            {% for dr in dr_list %}
+                            <tr>
+                                <td>{{ dr }}</td>
+                                <td><input class="form-control form-control-sm" name="to_{{ dr }}" value="{{ cfg['dr_referenti'][dr]['to'] }}"></td>
+                                <td><input class="form-control form-control-sm" name="cc_{{ dr }}" value="{{ cfg['dr_referenti'][dr]['cc'] }}"></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% endif %}
+                <button class="btn btn-success mt-3">Salva configurazione email</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="tab-pane fade" id="tab5">
+        <div class="card p-3">
+            <h4>Archivio completo</h4>
+            <form method="get" class="row g-2 mb-3">
+                <div class="col-md-4">
+                    <label class="form-label">Filtra per ROTABILE</label>
+                    <select class="form-select" name="rotabile">
+                        <option value="TUTTI">TUTTI</option>
+                        {% for r in rotabili_archivio %}
+                        <option value="{{ r }}">{{ r }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button class="btn btn-outline-secondary w-100">Filtra</button>
+                </div>
+            </form>
+
+            <div class="mb-2 small text-muted">Record trovati: {{ view_raw|length }}</div>
+
+            <div class="table-responsive">
+                <table class="table table-sm table-striped table-bordered">
+                    <thead>
+                        <tr>
+                            <th>ID</th><th>DR</th><th>ROTABILE</th><th>IMC</th><th>DATA ANORMALITA</th>
+                            <th>N° AVVISO</th><th>GRAVITA</th><th>DATA PRESA IN CARICO</th>
+                            <th>DATA RIENTRO</th><th>DATA NOTIFICA RIENTRO</th><th>STATO</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in view_raw %}
+                        <tr>
+                            <td>{{ row['ID'] }}</td>
+                            <td>{{ row['DR'] }}</td>
+                            <td>{{ row['ROTABILE'] }}</td>
+                            <td>{{ row['IMC'] }}</td>
+                            <td>{{ row['DATA ANORMALITA'] }}</td>
+                            <td>{{ row['N° AVVISO'] }}</td>
+                            <td>{{ row['GRAVITA'] }}</td>
+                            <td>{{ row['DATA PRESA IN CARICO'] }}</td>
+                            <td>{{ row['DATA RIENTRO'] }}</td>
+                            <td>{{ row['DATA NOTIFICA RIENTRO'] }}</td>
+                            <td>{{ row['STATO'] }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <a class="btn btn-success mt-2" href="{{ url_for('export_archivio') }}">Scarica Excel filtrato</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
