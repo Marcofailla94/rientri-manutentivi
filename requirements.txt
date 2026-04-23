@@ -1,7 +1,10 @@
-streamlit>=1.40
 pandas>=2.2
 openpyxl>=3.1
 gspread
 oauth2client
 sqlalchemy
 pymysql
+flask
+xlswriter
+requests
+reportlab
