@@ -1,0 +1,98 @@
+body{
+    background:#f5f6f7;
+    font-family:Segoe UI, Arial, sans-serif;
+}
+.hdr{
+    background:#ffd84d;
+    border:2px solid #d0b03a;
+    border-radius:12px;
+    padding:16px 18px;
+    margin-bottom:18px;
+}
+.t1{
+    color:#0b6b2e;
+    font-weight:800;
+    font-size:30px;
+    line-height:1.1;
+    margin:0;
+}
+.t2{
+    color:#0b6b2e;
+    font-weight:800;
+    font-size:22px;
+    line-height:1.2;
+    margin:6px 0 0 0;
+}
+.t3{
+    color:#0b6b2e;
+    font-weight:800;
+    font-size:18px;
+    line-height:1.2;
+    margin:4px 0 0 0;
+}
+.pill{
+    display:inline-block;
+    margin-top:10px;
+    padding:6px 12px;
+    border-radius:999px;
+    background:#0b6b2e;
+    color:#fff;
+    font-weight:700;
+}
+.logo-box{
+    max-height:130px;
+    object-fit:contain;
+}
+.metric-card{
+    background:#fff;
+    border:1px solid #dee2e6;
+    border-radius:12px;
+    padding:14px 16px;
+    height:100%;
+}
+.metric-title{
+    font-size:13px;
+    color:#666;
+    font-weight:700;
+}
+.metric-value{
+    font-size:28px;
+    font-weight:800;
+    color:#222;
+}
+.legend-wrap{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:6px;
+}
+.legend-box{
+    padding:8px 10px;
+    border-radius:10px;
+    border:1px solid #ddd;
+    font-weight:700;
+    text-align:center;
+    font-size:12px;
+}
+.segn-card{
+    border:1px solid #d0d7de;
+    border-radius:12px;
+    padding:12px;
+    margin-bottom:12px;
+}
+.mini-card{
+    background:#fff;
+    border:1px solid #e3e3e3;
+    border-radius:10px;
+    padding:10px;
+    margin-bottom:10px;
+}
+.nav-tabs .nav-link{
+    font-weight:700;
+    color:#0b6b2e;
+}
+.nav-tabs .nav-link.active{
+    color:#0b6b2e;
+}
+.card{
+    border-radius:12px;
+}
