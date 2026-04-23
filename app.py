@@ -7,15 +7,16 @@ from io import BytesIO
 
 import pandas as pd
 import streamlit as st
-from supabase import create_client, Client
+from sqlalchemy import create_engine, text
 
 APP_TITLE = "Rientri Manutentivi"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ASSET_FILE = os.path.join(BASE_DIR, "asset DOR.xlsx")
 CONFIG_FILE = os.path.join(BASE_DIR, "config_email.json")
 LOGO_FILE = os.path.join(BASE_DIR, "regionale.png")
+SECRETS_FILE = os.path.join(BASE_DIR, "secrets.toml")
 
-SUPABASE_TABLE_NAME = "rientri_manutentivi"
+MYSQL_TABLE_NAME = "rientri_manutentivi"
 
 DR_LIST_DEFAULT = [
     'ABRUZZO', 'CALABRIA', 'CAMPANIA', 'FRIULI-VENEZIA GIULIA', 'LAZIO',
@@ -60,31 +61,6 @@ STATUS_LABELS = {
     'RIENTRATO': 'RIENTRATO IN IMPIANTO',
     'TRATTATA': 'TRATTATA'
 }
-
-DB_TO_UI_MAP = {
-    'id': 'ID',
-    'dr': 'DR',
-    'rotabile': 'ROTABILE',
-    'imc': 'IMC',
-    'data_anormalita': 'DATA ANORMALITA',
-    'avaria': 'AVARIA',
-    'n_avviso': 'N° AVVISO',
-    'gravita': 'GRAVITA',
-    'data_presa_in_carico': 'DATA PRESA IN CARICO',
-    'data_rientro': 'DATA RIENTRO',
-    'data_notifica_rientro': 'DATA NOTIFICA RIENTRO',
-    'congruenza': 'CONGRUENZA (SI/NO)',
-    'note_riscontro': 'NOTE RISCONTRO',
-    'n_ordine': 'N° ORDINE',
-    'data_rese_ries': 'DATA RESE/RIES',
-    'stato': 'STATO',
-    'data_creazione': 'DATA CREAZIONE',
-    'ultimo_aggiornamento': 'ULTIMO AGGIORNAMENTO',
-    'motivazione_cambio_rientro': 'MOTIVAZIONE CAMBIO RIENTRO',
-    'powerapps_id': '__PowerAppsId__'
-}
-
-UI_TO_DB_MAP = {v: k for k, v in DB_TO_UI_MAP.items()}
 
 
 def fmt_date(v):
@@ -143,10 +119,27 @@ def mailto(to, cc, subject, body):
     return url
 
 
-def get_supabase_client() -> Client:
-    url = st.secrets["SUPABASE_URL"]
-    key = st.secrets["SUPABASE_KEY"]
-    return create_client(url, key)
+def load_database_url():
+    try:
+        if "DATABASE_URL" in st.secrets:
+            return st.secrets["DATABASE_URL"]
+    except Exception:
+        pass
+
+    if os.path.exists(SECRETS_FILE):
+        with open(SECRETS_FILE, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith("DATABASE_URL"):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
+
+    raise ValueError("DATABASE_URL non trovato in secrets.toml")
+
+
+@st.cache_resource(show_spinner=False)
+def get_engine():
+    db_url = load_database_url()
+    return create_engine(db_url, pool_recycle=280, pool_pre_ping=True)
 
 
 def build_password_map(dr_list):
@@ -288,14 +281,36 @@ def load_asset():
 
 
 def load_segnalazioni():
-    client = get_supabase_client()
-    response = client.table(SUPABASE_TABLE_NAME).select("*").execute()
-    rows = response.data or []
+    engine = get_engine()
 
-    if not rows:
-        df = pd.DataFrame(columns=ALL_COLUMNS)
-    else:
-        df = pd.DataFrame(rows).rename(columns=DB_TO_UI_MAP)
+    query = f"""
+        SELECT
+            id AS `ID`,
+            dr AS `DR`,
+            rotabile AS `ROTABILE`,
+            imc AS `IMC`,
+            data_anormalita AS `DATA ANORMALITA`,
+            avaria AS `AVARIA`,
+            n_avviso AS `N° AVVISO`,
+            gravita AS `GRAVITA`,
+            data_presa_in_carico AS `DATA PRESA IN CARICO`,
+            data_rientro AS `DATA RIENTRO`,
+            data_notifica_rientro AS `DATA NOTIFICA RIENTRO`,
+            congruenza AS `CONGRUENZA (SI/NO)`,
+            note_riscontro AS `NOTE RISCONTRO`,
+            n_ordine AS `N° ORDINE`,
+            data_rese_ries AS `DATA RESE/RIES`,
+            stato AS `STATO`,
+            data_creazione AS `DATA CREAZIONE`,
+            ultimo_aggiornamento AS `ULTIMO AGGIORNAMENTO`,
+            motivazione_cambio_rientro AS `MOTIVAZIONE CAMBIO RIENTRO`,
+            powerapps_id AS `__PowerAppsId__`
+        FROM {MYSQL_TABLE_NAME}
+        ORDER BY ultimo_aggiornamento DESC, data_creazione DESC
+    """
+
+    with engine.connect() as conn:
+        df = pd.read_sql(query, conn)
 
     for c in ALL_COLUMNS:
         if c not in df.columns:
@@ -307,41 +322,53 @@ def load_segnalazioni():
 
 
 def save_df(df):
-    client = get_supabase_client()
+    engine = get_engine()
     df_to_save = df.copy().fillna('')
 
-    payload = []
-    for _, row in df_to_save.iterrows():
-        payload.append({
-            'id': txt(row['ID']),
-            'dr': txt(row['DR']),
-            'rotabile': txt(row['ROTABILE']),
-            'imc': txt(row['IMC']),
-            'data_anormalita': normalize_date_for_db(row['DATA ANORMALITA']),
-            'avaria': txt(row['AVARIA']),
-            'n_avviso': txt(row['N° AVVISO']),
-            'gravita': txt(row['GRAVITA']),
-            'data_presa_in_carico': normalize_date_for_db(row['DATA PRESA IN CARICO']),
-            'data_rientro': normalize_date_for_db(row['DATA RIENTRO']),
-            'data_notifica_rientro': normalize_date_for_db(row['DATA NOTIFICA RIENTRO']),
-            'congruenza': txt(row['CONGRUENZA (SI/NO)']),
-            'note_riscontro': txt(row['NOTE RISCONTRO']),
-            'n_ordine': txt(row['N° ORDINE']),
-            'data_rese_ries': normalize_date_for_db(row['DATA RESE/RIES']),
-            'stato': txt(row['STATO']),
-            'data_creazione': normalize_timestamp_for_db(row['DATA CREAZIONE']),
-            'ultimo_aggiornamento': normalize_timestamp_for_db(row['ULTIMO AGGIORNAMENTO']),
-            'motivazione_cambio_rientro': txt(row['MOTIVAZIONE CAMBIO RIENTRO']),
-            'powerapps_id': txt(row['__PowerAppsId__'])
-        })
+    delete_sql = text(f"DELETE FROM {MYSQL_TABLE_NAME}")
 
-    if payload:
-        batch_size = 500
-        for i in range(0, len(payload), batch_size):
-            client.table(SUPABASE_TABLE_NAME).upsert(
-                payload[i:i + batch_size],
-                on_conflict="id"
-            ).execute()
+    insert_sql = text(f"""
+        INSERT INTO {MYSQL_TABLE_NAME} (
+            id, dr, rotabile, imc, data_anormalita, avaria, n_avviso, gravita,
+            data_presa_in_carico, data_rientro, data_notifica_rientro,
+            congruenza, note_riscontro, n_ordine, data_rese_ries,
+            stato, data_creazione, ultimo_aggiornamento,
+            motivazione_cambio_rientro, powerapps_id
+        ) VALUES (
+            :id, :dr, :rotabile, :imc, :data_anormalita, :avaria, :n_avviso, :gravita,
+            :data_presa_in_carico, :data_rientro, :data_notifica_rientro,
+            :congruenza, :note_riscontro, :n_ordine, :data_rese_ries,
+            :stato, :data_creazione, :ultimo_aggiornamento,
+            :motivazione_cambio_rientro, :powerapps_id
+        )
+    """)
+
+    with engine.begin() as conn:
+        conn.execute(delete_sql)
+
+        for _, row in df_to_save.iterrows():
+            conn.execute(insert_sql, {
+                "id": txt(row['ID']),
+                "dr": txt(row['DR']),
+                "rotabile": txt(row['ROTABILE']),
+                "imc": txt(row['IMC']),
+                "data_anormalita": normalize_date_for_db(row['DATA ANORMALITA']),
+                "avaria": txt(row['AVARIA']),
+                "n_avviso": txt(row['N° AVVISO']),
+                "gravita": txt(row['GRAVITA']),
+                "data_presa_in_carico": normalize_date_for_db(row['DATA PRESA IN CARICO']),
+                "data_rientro": normalize_date_for_db(row['DATA RIENTRO']),
+                "data_notifica_rientro": normalize_date_for_db(row['DATA NOTIFICA RIENTRO']),
+                "congruenza": txt(row['CONGRUENZA (SI/NO)']),
+                "note_riscontro": txt(row['NOTE RISCONTRO']),
+                "n_ordine": txt(row['N° ORDINE']),
+                "data_rese_ries": normalize_date_for_db(row['DATA RESE/RIES']),
+                "stato": txt(row['STATO']),
+                "data_creazione": normalize_timestamp_for_db(row['DATA CREAZIONE']),
+                "ultimo_aggiornamento": normalize_timestamp_for_db(row['ULTIMO AGGIORNAMENTO']),
+                "motivazione_cambio_rientro": txt(row['MOTIVAZIONE CAMBIO RIENTRO']),
+                "powerapps_id": txt(row['__PowerAppsId__'])
+            })
 
 
 def dataframe_to_excel_bytes(df):
