@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-5">
+        <div class="card shadow-sm p-4">
+            <h3 class="mb-3">Accesso applicazione</h3>
+            <form method="post">
+                <div class="mb-3">
+                    <label class="form-label">Seleziona profilo</label>
+                    <select class="form-select" name="ruolo" required>
+                        <option value="">Seleziona...</option>
+                        <option value="Control Room">Control Room</option>
+                        <option value="Admin">Admin</option>
+                        {% for dr in dr_list %}
+                        <option value="{{ dr }}">{{ dr }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Password</label>
+                    <input class="form-control" type="password" name="password" required>
+                </div>
+                <button class="btn btn-success w-100">Accedi</button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}
